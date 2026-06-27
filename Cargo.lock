@@ -842,6 +842,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "home"
 version = "0.5.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1446,9 +1452,11 @@ dependencies = [
  "polars-compute",
  "polars-core",
  "polars-error",
+ "polars-expr",
  "polars-io",
  "polars-lazy",
  "polars-ops",
+ "polars-sql",
  "polars-time",
  "polars-utils",
  "version_check",
@@ -1460,6 +1468,7 @@ version = "0.54.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "87d4892d5cc6461bb4a184d18e6fa03a5d316ee1d6de06a33dfa08d479fbc2db"
 dependencies = [
+ "atoi_simd",
  "bitflags",
  "bytemuck",
  "bytes",
@@ -1472,6 +1481,7 @@ dependencies = [
  "getrandom 0.3.4",
  "half",
  "hashbrown 0.16.1",
+ "itoa",
  "lz4",
  "num-traits",
  "polars-arrow-format",
@@ -1541,6 +1551,7 @@ dependencies = [
  "chrono",
  "either",
  "fast-float2",
+ "half",
  "hashbrown 0.16.1",
  "itoa",
  "num-traits",
@@ -1576,6 +1587,7 @@ dependencies = [
  "boxcar",
  "bytemuck",
  "chrono",
+ "chrono-tz",
  "comfy-table",
  "either",
  "getrandom 0.3.4",
@@ -1658,6 +1670,7 @@ dependencies = [
  "rand 0.9.4",
  "rayon",
  "recursive",
+ "regex",
  "version_check",
 ]
 
@@ -1789,9 +1802,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb146490a717ac5ae4ff3a22a5adf3ebae79361f187b1f550f9e24783d7ad765"
 dependencies = [
  "argminmax",
+ "base64",
  "bytemuck",
+ "chrono",
+ "chrono-tz",
  "either",
  "hashbrown 0.16.1",
+ "hex",
  "indexmap",
  "libm",
  "memchr",
@@ -1807,6 +1824,8 @@ dependencies = [
  "regex",
  "regex-syntax",
  "strum_macros",
+ "unicode-normalization",
+ "unicode-reverse",
  "version_check",
 ]
 
@@ -1857,6 +1876,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "chrono",
+ "chrono-tz",
  "either",
  "futures",
  "hashbrown 0.16.1",
@@ -1876,6 +1896,7 @@ dependencies = [
  "polars-utils",
  "rayon",
  "recursive",
+ "regex",
  "sha2",
  "slotmap",
  "strum_macros",
@@ -1910,6 +1931,26 @@ dependencies = [
  "polars-utils",
  "serde",
  "version_check",
+]
+
+[[package]]
+name = "polars-sql"
+version = "0.54.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b282a6164927eb12774b66b071b773a1573173ae53758e8d4df50389ff06efa2"
+dependencies = [
+ "bitflags",
+ "hex",
+ "polars-core",
+ "polars-error",
+ "polars-lazy",
+ "polars-ops",
+ "polars-plan",
+ "polars-time",
+ "polars-utils",
+ "regex",
+ "serde",
+ "sqlparser",
 ]
 
 [[package]]
@@ -1963,6 +2004,7 @@ dependencies = [
  "atoi_simd",
  "bytemuck",
  "chrono",
+ "chrono-tz",
  "now",
  "num-traits",
  "polars-arrow",
@@ -2743,6 +2785,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlparser"
+version = "0.60.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "505aa16b045c4c1375bf5f125cce3813d0176325bfe9ffc4a903f423de7774ff"
+dependencies = [
+ "log",
+ "recursive",
+ "sqlparser_derive",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "028e551d5e270b31b9f3ea271778d9d827148d4287a5d96167b6bb9787f5cc38"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3053,6 +3117,24 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
+name = "unicode-reverse"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b6f4888ebc23094adfb574fdca9fdc891826287a6397d2cd28802ffd6f20c76"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "unicode-segmentation"

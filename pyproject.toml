@@ -9,6 +9,19 @@ description = "Rust kernel factor framework for Polars panels"
 requires-python = ">=3.10"
 dependencies = ["polars>=1.0"]
 
+[dependency-groups]
+dev = [
+    "maturin>=1.8,<2",
+    "pytest>=9.0",
+]
+
 [tool.maturin]
 manifest-path = "crates/qfactors-py/Cargo.toml"
 module-name = "qfactors"
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

@@ -17,6 +17,8 @@ polars = { version = "0.54.4", default-features = false, features = [
     "dtype-date",
     "dtype-datetime",
     "fmt",
+    "nightly",
+    "performant",
     "strings",
 ] }
 pyo3 = "0.28"
