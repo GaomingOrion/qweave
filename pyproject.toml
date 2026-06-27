@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "qfactors"
+version = "0.1.0"
+description = "Rust kernel factor framework for Polars panels"
+requires-python = ">=3.10"
+dependencies = ["polars>=1.0"]
+
+[tool.maturin]
+manifest-path = "crates/qfactors-py/Cargo.toml"
+module-name = "qfactors"
