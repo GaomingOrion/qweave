@@ -11,6 +11,7 @@ pub mod registry;
 
 pub use column_store::ColumnStore;
 pub use compute_panel::compute_panel;
+pub use compute_sink::{ComputeResult, ComputeSummary};
 pub use error::{QFactorsError, Result};
 pub use factor::{
     ColumnSpec, DType, FactorComputeFn, FactorDescriptor, FactorResult, ParamSpec, ParamValue,

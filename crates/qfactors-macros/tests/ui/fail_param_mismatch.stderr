@@ -1,0 +1,5 @@
+error: each parameter set must match the f64 kernel parameter names
+ --> tests/ui/fail_param_mismatch.rs:9:4
+  |
+9 | fn bad(volume: &[f64], k: f64) -> f64 {
+  |    ^^^

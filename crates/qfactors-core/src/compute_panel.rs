@@ -1,9 +1,10 @@
 use std::collections::{BTreeSet, HashSet};
 
 use polars::prelude::*;
+use rayon::prelude::*;
 
 use crate::column_store::{ColumnStore, ensure_dtype, ensure_no_nulls};
-use crate::compute_sink::MemorySink;
+use crate::compute_sink::{ComputeResult, ComputeSink};
 use crate::error::{QFactorsError, Result};
 use crate::factor::{FactorResult, ResolvedFactor, default_output_columns};
 use crate::obs_range_cache::ObsRangeCache;
@@ -15,30 +16,20 @@ pub fn compute_panel(
     observation_times: Series,
     factor_names: Vec<String>,
     output_path: Option<&str>,
-) -> Result<DataFrame> {
-    if output_path.is_some() {
-        return Err(QFactorsError::UnsupportedOutputPath);
-    }
-
+) -> Result<ComputeResult> {
     let columns = ColumnStore::new(panel.dataframe());
     let resolved = resolve_factors(panel, factor_registry()?, &factor_names)?;
     let windows = collect_distinct_windows(&resolved)?;
     let observations = panel.resolve_observation_times(observation_times)?;
-    let mut sink = MemorySink::new();
+    let mut sink = ComputeSink::for_output(output_path);
 
     for observation in observations {
         let range_cache = ObsRangeCache::new(panel, observation.ord_exclusive, &windows)?;
-        let mut factor_columns = Vec::new();
-
-        for factor in &resolved {
-            let ranges = range_cache.ranges_for(factor.desc.window)?;
-            let result = (factor.desc.compute)(&columns, ranges, factor)?;
-            validate_factor_result(panel, factor, &result)?;
-            factor_columns.extend(result);
-        }
+        let factor_columns =
+            compute_factors_for_observation(panel, &columns, &range_cache, &resolved)?;
 
         let frame = panel.build_observation_frame(&observation, factor_columns)?;
-        sink.write_observation(frame);
+        sink.write_observation(frame)?;
     }
 
     sink.finish()
@@ -122,6 +113,25 @@ fn collect_distinct_windows(factors: &[ResolvedFactor<'_>]) -> Result<Vec<usize>
         windows.insert(factor.desc.window);
     }
     Ok(windows.into_iter().collect())
+}
+
+fn compute_factors_for_observation(
+    panel: &PreparedPanel,
+    columns: &ColumnStore<'_>,
+    range_cache: &ObsRangeCache,
+    factors: &[ResolvedFactor<'_>],
+) -> Result<FactorResult> {
+    let results = factors
+        .par_iter()
+        .map(|factor| {
+            let ranges = range_cache.ranges_for(factor.desc.window)?;
+            let result = (factor.desc.compute)(columns, ranges, factor)?;
+            validate_factor_result(panel, factor, &result)?;
+            Ok(result)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(results.into_iter().flatten().collect())
 }
 
 fn validate_factor_result(
@@ -234,12 +244,15 @@ mod tests {
     #[test]
     fn computes_memory_panel_in_observation_then_group_order() -> Result<()> {
         let panel = panel()?;
-        let out = compute_panel(
+        let out = match compute_panel(
             &panel,
             Series::new("time".into(), [2i64, 3]),
             vec!["dummy".to_string()],
             None,
-        )?;
+        )? {
+            ComputeResult::Memory(out) => out,
+            ComputeResult::File(_) => panic!("expected memory result"),
+        };
 
         assert_eq!(out.height(), 4);
         assert_eq!(

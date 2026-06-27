@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 linkme.workspace = true
 polars.workspace = true
+rayon.workspace = true
 thiserror.workspace = true

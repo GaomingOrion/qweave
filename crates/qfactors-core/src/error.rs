@@ -95,4 +95,7 @@ pub enum QFactorsError {
 
     #[error("Polars error: {0}")]
     Polars(#[from] PolarsError),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }

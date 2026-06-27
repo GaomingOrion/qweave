@@ -104,6 +104,52 @@ def test_factor_catalog_contains_registered_ret_and_is_filterable():
     assert selected == ["ret"]
 
 
+def test_factor_catalog_contains_param_factor_and_is_filterable():
+    catalog = qfactors.factor_catalog()
+
+    row = catalog.filter(pl.col("factor_name") == "volume_breakout_20_k15").row(0, named=True)
+    assert row["kernel_name"] == "volume_breakout"
+    assert row["window"] == 20
+    assert row["input_names"] == ["volume"]
+    assert row["param_set"] == "k15"
+    assert row["param_k"] == pytest.approx(1.5)
+
+    selected = (
+        catalog.filter(pl.col("kernel_name") == "volume_breakout")
+        .filter(pl.col("window") == 20)
+        .filter(pl.col("param_k") == 1.5)
+        .get_column("factor_name")
+        .to_list()
+    )
+    assert selected == ["volume_breakout_20_k15"]
+
+
+def test_compute_panel_param_factor_matches_python_baseline():
+    df = _phase2_input_frame()
+    panel = qfactors.prepare_panel(df, group_col="asset", time_col="time")
+
+    out = panel.compute_panel(
+        observation_times=[61],
+        factors=["volume_breakout_20_k15", "volume_breakout_60_k15"],
+    )
+
+    for factor_name, window, k in [
+        ("volume_breakout_20_k15", 20, 1.5),
+        ("volume_breakout_60_k15", 60, 1.5),
+    ]:
+        values = out.get_column(factor_name).to_list()
+        expected = [
+            _volume_breakout_baseline(df, 61, "A", window, k),
+            _volume_breakout_baseline(df, 61, "B", window, k),
+            math.nan,
+        ]
+        for actual, expected_value in zip(values, expected):
+            if math.isnan(expected_value):
+                assert math.isnan(actual)
+            else:
+                assert actual == pytest.approx(expected_value)
+
+
 def test_compute_panel_rejects_unknown_factor():
     panel = qfactors.prepare_panel(_phase2_input_frame(), group_col="asset", time_col="time")
 
@@ -111,11 +157,30 @@ def test_compute_panel_rejects_unknown_factor():
         panel.compute_panel(observation_times=[60], factors=["missing"])
 
 
-def test_compute_panel_rejects_output_path_in_phase2():
+def test_compute_panel_file_mode_matches_memory(tmp_path):
     panel = qfactors.prepare_panel(_phase2_input_frame(), group_col="asset", time_col="time")
+    output_path = tmp_path / "factor_panel.parquet"
 
-    with pytest.raises(ValueError, match="output_path is not supported"):
-        panel.compute_panel(observation_times=[60], factors=["ret"], output_path="factor_panel.parquet")
+    memory = panel.compute_panel(observation_times=[61, 60], factors=["ret"])
+    summary = panel.compute_panel(
+        observation_times=[61, 60],
+        factors=["ret"],
+        output_path=str(output_path),
+    )
+    file_out = pl.read_parquet(output_path)
+
+    assert summary == {
+        "output_path": str(output_path),
+        "n_observations": 2,
+        "n_rows": memory.height,
+    }
+    assert file_out.columns == memory.columns
+    assert file_out.select(["time", "asset"]).rows() == memory.select(["time", "asset"]).rows()
+    for actual, expected in zip(file_out.get_column("ret").to_list(), memory.get_column("ret").to_list()):
+        if math.isnan(expected):
+            assert math.isnan(actual)
+        else:
+            assert actual == pytest.approx(expected)
 
 
 def _phase2_input_frame():
@@ -128,9 +193,10 @@ def _phase2_input_frame():
                     "time": time,
                     "open": multiplier * time,
                     "close": multiplier * (time + 1),
+                    "volume": 100.0 if asset == "A" and time == 61 else 10.0,
                 }
             )
-    rows.append({"asset": "C", "time": 61, "open": 100.0, "close": 110.0})
+    rows.append({"asset": "C", "time": 61, "open": 100.0, "close": 110.0, "volume": 100.0})
     return pl.DataFrame(rows)
 
 
@@ -143,3 +209,16 @@ def _ret_baseline(df, observation_time, asset, open_col, close_col):
     if window.height < 60:
         return math.nan
     return window.get_column(close_col)[-1] / window.get_column(open_col)[0] - 1.0
+
+
+def _volume_breakout_baseline(df, observation_time, asset, window, k):
+    window_df = (
+        df.filter((pl.col("asset") == asset) & (pl.col("time") <= observation_time))
+        .sort("time")
+        .tail(window)
+    )
+    if window_df.height < window:
+        return math.nan
+
+    volume = window_df.get_column("volume").to_list()
+    return 1.0 if volume[-1] > k * (sum(volume) / len(volume)) else 0.0

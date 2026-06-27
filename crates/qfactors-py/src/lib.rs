@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use polars::prelude::Series;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
+use pyo3::types::{PyAny, PyDict};
 use pyo3_polars::{PyDataFrame, PySeries};
 use qfactors_core::{
-    NullPolicy, PreparePanelOptions, PreparedPanel, QFactorsError, compute_panel, factor_catalog,
+    ComputeResult, ComputeSummary, NullPolicy, PreparePanelOptions, PreparedPanel, QFactorsError,
+    compute_panel, factor_catalog,
 };
 
 #[pyclass(name = "PreparedPanel", unsendable)]
@@ -47,11 +48,14 @@ impl PyPreparedPanel {
         observation_times: &Bound<'_, PyAny>,
         factors: Vec<String>,
         output_path: Option<&str>,
-    ) -> PyResult<PyDataFrame> {
+    ) -> PyResult<Py<PyAny>> {
         let observation_times = observation_series_from_py(py, observation_times)?;
         let result = compute_panel(&self.inner, observation_times, factors, output_path)
             .map_err(to_py_err)?;
-        Ok(PyDataFrame(result))
+        match result {
+            ComputeResult::Memory(df) => Ok(PyDataFrame(df).into_pyobject(py)?.unbind()),
+            ComputeResult::File(summary) => summary_to_py(py, summary),
+        }
     }
 }
 
@@ -111,6 +115,14 @@ fn observation_series_from_py(
     let polars = PyModule::import(py, "polars")?;
     let series = polars.getattr("Series")?.call1((observation_times,))?;
     Ok(series.extract::<PySeries>()?.0)
+}
+
+fn summary_to_py(py: Python<'_>, summary: ComputeSummary) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    dict.set_item("output_path", summary.output_path)?;
+    dict.set_item("n_observations", summary.n_observations)?;
+    dict.set_item("n_rows", summary.n_rows)?;
+    Ok(dict.into_any().unbind())
 }
 
 #[pymodule]

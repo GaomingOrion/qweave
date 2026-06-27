@@ -7,12 +7,28 @@ pub fn ret(open: &[f64], close: &[f64]) -> f64 {
     close[close.len() - 1] / open[0] - 1.0
 }
 
+#[factor(
+    windows = [20, 60],
+    params = [
+        { name = "k15", k = 1.5 },
+        { name = "k20", k = 2.0 },
+    ]
+)]
+pub fn volume_breakout(volume: &[f64], k: f64) -> f64 {
+    let last = volume[volume.len() - 1];
+    let mean = volume.iter().sum::<f64>() / volume.len() as f64;
+    if last > k * mean { 1.0 } else { 0.0 }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use polars::prelude::*;
-    use qfactors_core::{NullPolicy, PreparePanelOptions, PreparedPanel, Result, compute_panel};
+    use qfactors_core::{
+        ComputeResult, NullPolicy, PreparePanelOptions, PreparedPanel, Result, compute_panel,
+        factor_catalog,
+    };
 
     use super::*;
 
@@ -62,12 +78,12 @@ mod tests {
             },
         )?;
 
-        let out = compute_panel(
+        let out = memory_frame(compute_panel(
             &panel,
             Series::new("time".into(), [60i64]),
             vec!["ret".to_string()],
             None,
-        )?;
+        )?)?;
         let values = out
             .column("ret")?
             .try_f64()
@@ -102,7 +118,7 @@ mod tests {
             },
         )?;
 
-        let out = compute_panel(
+        let out = memory_frame(compute_panel(
             &panel,
             Series::new("time".into(), [3i64]),
             vec![
@@ -112,7 +128,7 @@ mod tests {
                 "checked_delta".to_string(),
             ],
             None,
-        )?;
+        )?)?;
 
         assert_eq!(
             out.column("delta_2")?
@@ -151,5 +167,98 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn macro_generated_param_factors_are_cataloged_and_computed() -> qfactors_core::Result<()> {
+        let volume = (1..=60)
+            .map(|idx| if idx == 60 { 100.0 } else { 10.0 })
+            .collect::<Vec<_>>();
+        let df = df!(
+            "asset" => ["A"; 60],
+            "time" => (1i64..=60).collect::<Vec<_>>(),
+            "open" => vec![1.0; 60],
+            "close" => vec![2.0; 60],
+            "volume" => volume,
+        )?;
+        let panel = PreparedPanel::new(
+            df,
+            PreparePanelOptions {
+                group_col: "asset".to_string(),
+                time_col: "time".to_string(),
+                column_aliases: HashMap::new(),
+                sort: true,
+                rechunk: true,
+                null_policy: NullPolicy::Error,
+                output_group_id: false,
+            },
+        )?;
+
+        let catalog = factor_catalog()?;
+        let row_idx = catalog
+            .column("factor_name")?
+            .try_str()
+            .expect("factor_name is string")
+            .iter()
+            .position(|value| value == Some("volume_breakout_20_k15"))
+            .expect("volume_breakout_20_k15 is registered");
+        assert_eq!(
+            catalog
+                .column("param_set")?
+                .try_str()
+                .expect("param_set is string")
+                .get(row_idx),
+            Some("k15")
+        );
+        assert_eq!(
+            catalog
+                .column("param_k")?
+                .try_f64()
+                .expect("param_k is f64")
+                .get(row_idx),
+            Some(1.5)
+        );
+
+        let out = memory_frame(compute_panel(
+            &panel,
+            Series::new("time".into(), [60i64]),
+            vec![
+                "volume_breakout_20_k15".to_string(),
+                "volume_breakout_20_k20".to_string(),
+                "volume_breakout_60_k15".to_string(),
+            ],
+            None,
+        )?)?;
+
+        assert_eq!(
+            out.column("volume_breakout_20_k15")?
+                .try_f64()
+                .expect("volume_breakout_20_k15 is f64")
+                .get(0),
+            Some(1.0)
+        );
+        assert_eq!(
+            out.column("volume_breakout_20_k20")?
+                .try_f64()
+                .expect("volume_breakout_20_k20 is f64")
+                .get(0),
+            Some(1.0)
+        );
+        assert_eq!(
+            out.column("volume_breakout_60_k15")?
+                .try_f64()
+                .expect("volume_breakout_60_k15 is f64")
+                .get(0),
+            Some(1.0)
+        );
+
+        Ok(())
+    }
+
+    fn memory_frame(result: ComputeResult) -> qfactors_core::Result<DataFrame> {
+        match result {
+            ComputeResult::Memory(df) => Ok(df),
+            ComputeResult::File(_) => panic!("expected memory result"),
+        }
     }
 }
