@@ -56,12 +56,15 @@ pub fn compute_panel(
     validate_structural_column(df.column(&options.symbol_col)?, true)?;
     validate_structural_column(df.column(&options.time_col)?, false)?;
 
-    if !is_sorted_by_symbol_time(&df, &options)? {
-        df = sort_panel(&df, &options)?;
-    }
-
     let observations = resolve_observation_times(&df, &options.time_col, observation_times)?;
-    let partitions = build_observation_partitions(&df, &options, &observations.index_by_value)?;
+    let partitions = match scan_and_partition(&df, &options, &observations.index_by_value)? {
+        Some(partitions) => partitions,
+        None => {
+            df = sort_panel(&df, &options)?;
+            scan_and_partition(&df, &options, &observations.index_by_value)?
+                .expect("panel is sorted after sort_panel")
+        }
+    };
 
     apply_input_null_rules(&mut df, &resolved.required_inputs)?;
     if df.max_n_chunks() > 1 {
@@ -224,47 +227,11 @@ fn is_nan_value(value: &AnyValue<'_>) -> bool {
     }
 }
 
-fn is_sorted_by_symbol_time(df: &DataFrame, options: &ComputePanelOptions) -> Result<bool> {
-    let symbol = df.column(&options.symbol_col)?;
-    let time = df.column(&options.time_col)?;
-
-    for row in 1..df.height() {
-        let ordering = compare_symbol_time(
-            symbol.get(row - 1)?,
-            time.get(row - 1)?,
-            symbol.get(row)?,
-            time.get(row)?,
-            options,
-        )?;
-        if ordering == Ordering::Greater {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
-}
-
-fn compare_symbol_time(
-    left_symbol: AnyValue<'_>,
-    left_time: AnyValue<'_>,
-    right_symbol: AnyValue<'_>,
-    right_time: AnyValue<'_>,
-    options: &ComputePanelOptions,
-) -> Result<Ordering> {
-    match left_symbol.partial_cmp(&right_symbol) {
-        Some(Ordering::Equal) => {}
-        Some(ordering) => return Ok(ordering),
-        None => {
-            return Err(QFactorsError::NonComparableColumn {
-                column: options.symbol_col.clone(),
-            });
-        }
-    }
-
-    left_time
-        .partial_cmp(&right_time)
+fn cmp_values(current: &AnyValue<'_>, previous: &AnyValue<'_>, column: &str) -> Result<Ordering> {
+    current
+        .partial_cmp(previous)
         .ok_or_else(|| QFactorsError::NonComparableColumn {
-            column: options.time_col.clone(),
+            column: column.to_string(),
         })
 }
 
@@ -308,11 +275,17 @@ fn resolve_observation_times(
     })
 }
 
-fn build_observation_partitions(
+/// Single O(n) pass over the panel that simultaneously verifies sort order,
+/// rejects duplicate `(symbol, time)`, computes per-row `avail_len`, and assigns
+/// rows to their observation partition. Returns `Ok(None)` when the panel is not
+/// sorted by `(symbol, time)`, signalling the caller to sort and retry. Adjacent
+/// values are compared by borrowed `AnyValue` (no per-row clone); only the time
+/// lookup key is materialized, which is cheap for numeric/temporal time dtypes.
+fn scan_and_partition(
     df: &DataFrame,
     options: &ComputePanelOptions,
     observation_index: &HashMap<AnyValue<'static>, usize>,
-) -> Result<Vec<ObservationPartition>> {
+) -> Result<Option<Vec<ObservationPartition>>> {
     let symbol = df.column(&options.symbol_col)?;
     let time = df.column(&options.time_col)?;
     let mut partitions = (0..observation_index.len())
@@ -323,36 +296,39 @@ fn build_observation_partitions(
         })
         .collect::<Vec<_>>();
 
-    let mut previous_symbol: Option<AnyValue<'static>> = None;
-    let mut previous_time: Option<AnyValue<'static>> = None;
     let mut avail_len = 0usize;
-
     for row in 0..df.height() {
-        let symbol_value = symbol.get(row)?.into_static();
-        let time_value = time.get(row)?.into_static();
+        let time_value = time.get(row)?;
 
-        if previous_symbol.as_ref() == Some(&symbol_value) {
-            if previous_time.as_ref() == Some(&time_value) {
-                return Err(QFactorsError::DuplicateSymbolTime {
-                    symbol_col: options.symbol_col.clone(),
-                    time_col: options.time_col.clone(),
-                });
+        if row > 0 {
+            let symbol_value = symbol.get(row)?;
+            match cmp_values(&symbol_value, &symbol.get(row - 1)?, &options.symbol_col)? {
+                Ordering::Less => return Ok(None),
+                Ordering::Greater => avail_len = 1,
+                Ordering::Equal => {
+                    match cmp_values(&time_value, &time.get(row - 1)?, &options.time_col)? {
+                        Ordering::Less => return Ok(None),
+                        Ordering::Equal => {
+                            return Err(QFactorsError::DuplicateSymbolTime {
+                                symbol_col: options.symbol_col.clone(),
+                                time_col: options.time_col.clone(),
+                            });
+                        }
+                        Ordering::Greater => avail_len += 1,
+                    }
+                }
             }
-            avail_len += 1;
         } else {
             avail_len = 1;
         }
 
-        if let Some(&input_index) = observation_index.get(&time_value) {
+        if let Some(&input_index) = observation_index.get(&time_value.into_static()) {
             partitions[input_index].row_indices.push(row);
             partitions[input_index].avail_lens.push(avail_len);
         }
-
-        previous_symbol = Some(symbol_value);
-        previous_time = Some(time_value);
     }
 
-    Ok(partitions)
+    Ok(Some(partitions))
 }
 
 fn apply_input_null_rules(df: &mut DataFrame, required_inputs: &[RequiredInput]) -> Result<()> {
