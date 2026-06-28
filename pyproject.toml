@@ -18,6 +18,7 @@ dev = [
 [tool.maturin]
 manifest-path = "crates/qfactors-py/Cargo.toml"
 module-name = "qfactors"
+features = ["extension-module"]
 
 [tool.uv]
 package = false

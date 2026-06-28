@@ -6,96 +6,47 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3_polars::{PyDataFrame, PySeries};
 use qfactors_core::{
-    ComputeResult, ComputeSummary, NullPolicy, PreparePanelOptions, PreparedPanel, QFactorsError,
-    compute_panel, factor_catalog,
+    ComputePanelOptions, ComputeResult, ComputeSummary, QFactorsError,
+    compute_panel as compute_panel_core, factor_catalog,
 };
-
-#[pyclass(name = "PreparedPanel", unsendable)]
-struct PyPreparedPanel {
-    inner: PreparedPanel,
-}
-
-#[pymethods]
-impl PyPreparedPanel {
-    #[getter]
-    fn height(&self) -> usize {
-        self.inner.dataframe().height()
-    }
-
-    #[getter]
-    fn group_count(&self) -> usize {
-        self.inner.groups().len()
-    }
-
-    #[getter]
-    fn group_col(&self) -> String {
-        self.inner.group_col().to_string()
-    }
-
-    #[getter]
-    fn time_col(&self) -> String {
-        self.inner.time_col().to_string()
-    }
-
-    fn to_frame(&self) -> PyDataFrame {
-        PyDataFrame(self.inner.dataframe().clone())
-    }
-
-    #[pyo3(signature = (observation_times, factors, output_path = None))]
-    fn compute_panel(
-        &self,
-        py: Python<'_>,
-        observation_times: &Bound<'_, PyAny>,
-        factors: Vec<String>,
-        output_path: Option<&str>,
-    ) -> PyResult<Py<PyAny>> {
-        let observation_times = observation_series_from_py(py, observation_times)?;
-        let result = compute_panel(&self.inner, observation_times, factors, output_path)
-            .map_err(to_py_err)?;
-        match result {
-            ComputeResult::Memory(df) => Ok(PyDataFrame(df).into_pyobject(py)?.unbind()),
-            ComputeResult::File(summary) => summary_to_py(py, summary),
-        }
-    }
-}
 
 #[pyfunction]
 fn roundtrip(df: PyDataFrame) -> PyDataFrame {
     df
 }
 
-#[pyfunction(signature = (
+#[pyfunction(name = "compute_panel", signature = (
     df,
-    group_col,
+    symbol_col,
     time_col,
+    factors,
+    observation_times,
     column_aliases = None,
-    sort = true,
-    rechunk = true,
-    null_policy = "error",
-    output_group_id = false
+    output_path = None
 ))]
-fn prepare_panel(
+fn compute_panel_py(
+    py: Python<'_>,
     df: PyDataFrame,
-    group_col: &str,
+    symbol_col: &str,
     time_col: &str,
+    factors: Vec<String>,
+    observation_times: &Bound<'_, PyAny>,
     column_aliases: Option<HashMap<String, String>>,
-    sort: bool,
-    rechunk: bool,
-    null_policy: &str,
-    output_group_id: bool,
-) -> PyResult<PyPreparedPanel> {
-    let options = PreparePanelOptions {
-        group_col: group_col.to_string(),
+    output_path: Option<&str>,
+) -> PyResult<Py<PyAny>> {
+    let observation_times = observation_series_from_py(py, observation_times)?;
+    let options = ComputePanelOptions {
+        symbol_col: symbol_col.to_string(),
         time_col: time_col.to_string(),
         column_aliases: column_aliases.unwrap_or_default(),
-        sort,
-        rechunk,
-        null_policy: NullPolicy::parse(null_policy).map_err(to_py_err)?,
-        output_group_id,
     };
 
-    let panel = PreparedPanel::new(df.into(), options).map_err(to_py_err)?;
-    Ok(PyPreparedPanel { inner: panel })
+    let result = compute_panel_core(df.into(), options, factors, observation_times, output_path)
+        .map_err(to_py_err)?;
+    match result {
+        ComputeResult::Memory(df) => Ok(PyDataFrame(df).into_pyobject(py)?.unbind()),
+        ComputeResult::File(summary) => summary_to_py(py, summary),
+    }
 }
 
 #[pyfunction(name = "factor_catalog")]
@@ -128,9 +79,8 @@ fn summary_to_py(py: Python<'_>, summary: ComputeSummary) -> PyResult<Py<PyAny>>
 #[pymodule]
 fn qfactors(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     qfactors_factors::ensure_linked();
-    module.add_class::<PyPreparedPanel>()?;
     module.add_function(wrap_pyfunction!(roundtrip, module)?)?;
-    module.add_function(wrap_pyfunction!(prepare_panel, module)?)?;
+    module.add_function(wrap_pyfunction!(compute_panel_py, module)?)?;
     module.add_function(wrap_pyfunction!(factor_catalog_py, module)?)?;
     Ok(())
 }

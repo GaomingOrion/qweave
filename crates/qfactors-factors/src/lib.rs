@@ -26,8 +26,7 @@ mod tests {
 
     use polars::prelude::*;
     use qfactors_core::{
-        ComputeResult, NullPolicy, PreparePanelOptions, PreparedPanel, Result, compute_panel,
-        factor_catalog,
+        ComputePanelOptions, ComputeResult, Result, compute_panel, factor_catalog,
     };
 
     use super::*;
@@ -65,23 +64,11 @@ mod tests {
             "open" => open,
             "close" => close,
         )?;
-        let panel = PreparedPanel::new(
-            df,
-            PreparePanelOptions {
-                group_col: "asset".to_string(),
-                time_col: "time".to_string(),
-                column_aliases: HashMap::new(),
-                sort: true,
-                rechunk: true,
-                null_policy: NullPolicy::Error,
-                output_group_id: false,
-            },
-        )?;
-
         let out = memory_frame(compute_panel(
-            &panel,
-            Series::new("time".into(), [60i64]),
+            df,
+            options(),
             vec!["ret".to_string()],
+            Series::new("time".into(), [61i64]),
             None,
         )?)?;
         let values = out
@@ -91,7 +78,7 @@ mod tests {
             .into_no_null_iter()
             .collect::<Vec<_>>();
 
-        assert_eq!(values[0], 61.0 / 1.0 - 1.0);
+        assert_eq!(values[0], 62.0 / 2.0 - 1.0);
         assert!(values[1].is_nan());
 
         Ok(())
@@ -105,28 +92,16 @@ mod tests {
             "open" => [10.0, 11.0, 12.0],
             "close" => [20.0, 23.0, 27.0],
         )?;
-        let panel = PreparedPanel::new(
-            df,
-            PreparePanelOptions {
-                group_col: "asset".to_string(),
-                time_col: "time".to_string(),
-                column_aliases: HashMap::new(),
-                sort: true,
-                rechunk: true,
-                null_policy: NullPolicy::Error,
-                output_group_id: false,
-            },
-        )?;
-
         let out = memory_frame(compute_panel(
-            &panel,
-            Series::new("time".into(), [3i64]),
+            df,
+            options(),
             vec![
                 "delta_2".to_string(),
                 "delta_3".to_string(),
                 "bounds".to_string(),
                 "checked_delta".to_string(),
             ],
+            Series::new("time".into(), [3i64]),
             None,
         )?)?;
 
@@ -181,19 +156,6 @@ mod tests {
             "close" => vec![2.0; 60],
             "volume" => volume,
         )?;
-        let panel = PreparedPanel::new(
-            df,
-            PreparePanelOptions {
-                group_col: "asset".to_string(),
-                time_col: "time".to_string(),
-                column_aliases: HashMap::new(),
-                sort: true,
-                rechunk: true,
-                null_policy: NullPolicy::Error,
-                output_group_id: false,
-            },
-        )?;
-
         let catalog = factor_catalog()?;
         let row_idx = catalog
             .column("factor_name")?
@@ -220,13 +182,14 @@ mod tests {
         );
 
         let out = memory_frame(compute_panel(
-            &panel,
-            Series::new("time".into(), [60i64]),
+            df,
+            options(),
             vec![
                 "volume_breakout_20_k15".to_string(),
                 "volume_breakout_20_k20".to_string(),
                 "volume_breakout_60_k15".to_string(),
             ],
+            Series::new("time".into(), [60i64]),
             None,
         )?)?;
 
@@ -259,6 +222,14 @@ mod tests {
         match result {
             ComputeResult::Memory(df) => Ok(df),
             ComputeResult::File(_) => panic!("expected memory result"),
+        }
+    }
+
+    fn options() -> ComputePanelOptions {
+        ComputePanelOptions {
+            symbol_col: "asset".to_string(),
+            time_col: "time".to_string(),
+            column_aliases: HashMap::new(),
         }
     }
 }

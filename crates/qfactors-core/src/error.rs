@@ -8,29 +8,26 @@ pub enum QFactorsError {
     #[error("missing column `{0}`")]
     MissingColumn(String),
 
-    #[error("internal column `{0}` conflicts with input DataFrame")]
-    InternalColumnConflict(&'static str),
-
     #[error("null values are not allowed in column `{column}`")]
     NullNotAllowed { column: String },
 
     #[error("null values are not allowed in time column `{0}`")]
     TimeNull(String),
 
-    #[error("null values are not allowed in group column `{0}`")]
-    GroupNull(String),
+    #[error("null values are not allowed in symbol column `{0}`")]
+    SymbolNull(String),
 
-    #[error("null_policy `{0}` is not supported")]
-    UnsupportedNullPolicy(String),
+    #[error("NaN values are not allowed in structural column `{column}`")]
+    NaNNotAllowed { column: String },
 
-    #[error("column `{column}` has dtype {dtype}; expected Float64 for float_null_to_nan")]
-    FloatNullToNanTypeMismatch { column: String, dtype: String },
+    #[error("column `{column}` cannot be ordered")]
+    NonComparableColumn { column: String },
 
-    #[error("input must be sorted by [`{group_col}`, `{time_col}`] when sort=false")]
-    SortOrder { group_col: String, time_col: String },
-
-    #[error("duplicate (`{group_col}`, `{time_col}`) value found")]
-    DuplicateGroupTime { group_col: String, time_col: String },
+    #[error("duplicate (`{symbol_col}`, `{time_col}`) value found")]
+    DuplicateSymbolTime {
+        symbol_col: String,
+        time_col: String,
+    },
 
     #[error("column `{column}` has dtype {actual}; expected {expected}")]
     DTypeMismatch {
@@ -57,14 +54,14 @@ pub enum QFactorsError {
     #[error("duplicate observation time `{0}`")]
     DuplicateObservationTime(String),
 
+    #[error("observation_times cannot be empty")]
+    ObservationTimesEmpty,
+
     #[error("null values are not allowed in observation_times")]
     ObservationTimeNull,
 
     #[error("output column `{0}` conflicts with another output column")]
     OutputColumnConflict(String),
-
-    #[error("output_path is not supported in Phase 2 memory compute")]
-    UnsupportedOutputPath,
 
     #[error("factor `{factor_name}` returned {actual} columns; expected {expected}")]
     FactorOutputCount {
@@ -89,9 +86,6 @@ pub enum QFactorsError {
         expected: String,
         actual: String,
     },
-
-    #[error("range cache does not contain window {0}")]
-    MissingWindowRange(usize),
 
     #[error("Polars error: {0}")]
     Polars(#[from] PolarsError),

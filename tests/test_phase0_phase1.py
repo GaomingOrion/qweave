@@ -11,37 +11,38 @@ def test_roundtrip_dataframe():
     assert qfactors.roundtrip(df).equals(df)
 
 
-def test_prepare_panel_sorts_and_adds_internal_columns():
-    df = pl.DataFrame({"asset": ["B", "A", "A"], "time": [1, 2, 1], "close": [20.0, 11.0, 10.0]})
+def test_compute_panel_ignores_unused_null_columns():
+    df = _phase2_input_frame()
+    df = df.with_columns(pl.Series("unused", [None] * df.height))
 
-    panel = qfactors.prepare_panel(df, group_col="asset", time_col="time")
-    out = panel.to_frame()
+    out = _compute_panel(df, observation_times=[60], factors=["ret"])
 
-    assert panel.height == 3
-    assert panel.group_count == 2
-    assert out.get_column("asset").to_list() == ["A", "A", "B"]
-    assert "__qfactors_group_id" in out.columns
-    assert "__qfactors_time_ord" in out.columns
+    assert out.select(["time", "asset"]).rows() == [(60, "A"), (60, "B")]
 
 
 def test_float_null_to_nan():
-    df = pl.DataFrame({"asset": ["A", "A"], "time": [1, 2], "close": [10.0, None]})
+    rows = []
+    for time in range(1, 61):
+        rows.append(
+            {
+                "asset": "A",
+                "time": time,
+                "open": None if time == 1 else float(time),
+                "close": float(time + 1),
+                "volume": 10.0,
+            }
+        )
+    df = pl.DataFrame(rows)
 
-    panel = qfactors.prepare_panel(
-        df,
-        group_col="asset",
-        time_col="time",
-        null_policy="float_null_to_nan",
-    )
+    out = _compute_panel(df, observation_times=[60], factors=["ret"])
 
-    assert math.isnan(panel.to_frame().get_column("close").to_list()[1])
+    assert math.isnan(out.get_column("ret").to_list()[0])
 
 
 def test_compute_panel_ret_matches_python_baseline():
     df = _phase2_input_frame()
-    panel = qfactors.prepare_panel(df, group_col="asset", time_col="time")
 
-    out = panel.compute_panel(observation_times=[61, 60], factors=["ret"])
+    out = _compute_panel(df, observation_times=[61, 60], factors=["ret"])
 
     assert out.columns == ["time", "asset", "ret"]
     assert out.select(["time", "asset"]).rows() == [
@@ -50,7 +51,6 @@ def test_compute_panel_ret_matches_python_baseline():
         (61, "C"),
         (60, "A"),
         (60, "B"),
-        (60, "C"),
     ]
 
     values = out.get_column("ret").to_list()
@@ -60,7 +60,6 @@ def test_compute_panel_ret_matches_python_baseline():
         math.nan,
         _ret_baseline(df, 60, "A", "open", "close"),
         _ret_baseline(df, 60, "B", "open", "close"),
-        math.nan,
     ]
 
     for actual, expected_value in zip(values, expected):
@@ -72,14 +71,13 @@ def test_compute_panel_ret_matches_python_baseline():
 
 def test_compute_panel_ret_uses_column_aliases():
     df = _phase2_input_frame().rename({"open": "adj_open", "close": "adj_close"})
-    panel = qfactors.prepare_panel(
+
+    out = _compute_panel(
         df,
-        group_col="asset",
-        time_col="time",
+        observation_times=pl.Series([60]),
+        factors=["ret"],
         column_aliases={"open": "adj_open", "close": "adj_close"},
     )
-
-    out = panel.compute_panel(observation_times=pl.Series([60]), factors=["ret"])
 
     assert out.get_column("ret").to_list()[0] == pytest.approx(
         _ret_baseline(df, 60, "A", "adj_open", "adj_close")
@@ -126,9 +124,9 @@ def test_factor_catalog_contains_param_factor_and_is_filterable():
 
 def test_compute_panel_param_factor_matches_python_baseline():
     df = _phase2_input_frame()
-    panel = qfactors.prepare_panel(df, group_col="asset", time_col="time")
 
-    out = panel.compute_panel(
+    out = _compute_panel(
+        df,
         observation_times=[61],
         factors=["volume_breakout_20_k15", "volume_breakout_60_k15"],
     )
@@ -151,18 +149,17 @@ def test_compute_panel_param_factor_matches_python_baseline():
 
 
 def test_compute_panel_rejects_unknown_factor():
-    panel = qfactors.prepare_panel(_phase2_input_frame(), group_col="asset", time_col="time")
-
     with pytest.raises(ValueError, match="factor `missing` is not known"):
-        panel.compute_panel(observation_times=[60], factors=["missing"])
+        _compute_panel(_phase2_input_frame(), observation_times=[60], factors=["missing"])
 
 
 def test_compute_panel_file_mode_matches_memory(tmp_path):
-    panel = qfactors.prepare_panel(_phase2_input_frame(), group_col="asset", time_col="time")
+    df = _phase2_input_frame()
     output_path = tmp_path / "factor_panel.parquet"
 
-    memory = panel.compute_panel(observation_times=[61, 60], factors=["ret"])
-    summary = panel.compute_panel(
+    memory = _compute_panel(df, observation_times=[61, 60], factors=["ret"])
+    summary = _compute_panel(
+        df,
         observation_times=[61, 60],
         factors=["ret"],
         output_path=str(output_path),
@@ -181,6 +178,42 @@ def test_compute_panel_file_mode_matches_memory(tmp_path):
             assert math.isnan(actual)
         else:
             assert actual == pytest.approx(expected)
+
+
+def test_compute_panel_missing_observation_time_outputs_empty_frame(tmp_path):
+    df = _phase2_input_frame()
+    output_path = tmp_path / "empty_factor_panel.parquet"
+
+    memory = _compute_panel(df, observation_times=[999], factors=["ret"])
+    summary = _compute_panel(
+        df,
+        observation_times=[999],
+        factors=["ret"],
+        output_path=str(output_path),
+    )
+    file_out = pl.read_parquet(output_path)
+
+    assert memory.columns == ["time", "asset", "ret"]
+    assert memory.height == 0
+    assert summary == {
+        "output_path": str(output_path),
+        "n_observations": 1,
+        "n_rows": 0,
+    }
+    assert file_out.columns == memory.columns
+    assert file_out.height == 0
+
+
+def _compute_panel(df, observation_times, factors, column_aliases=None, output_path=None):
+    return qfactors.compute_panel(
+        df,
+        symbol_col="asset",
+        time_col="time",
+        factors=factors,
+        observation_times=observation_times,
+        column_aliases=column_aliases,
+        output_path=output_path,
+    )
 
 
 def _phase2_input_frame():

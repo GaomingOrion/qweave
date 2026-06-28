@@ -8,9 +8,13 @@ license.workspace = true
 name = "qfactors"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
 polars.workspace = true
-pyo3 = { workspace = true, features = ["extension-module"] }
+pyo3.workspace = true
 pyo3-polars.workspace = true
 qfactors-core = { path = "../qfactors-core" }
 qfactors-factors = { path = "../qfactors-factors" }
