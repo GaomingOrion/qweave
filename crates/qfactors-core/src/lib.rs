@@ -1,4 +1,5 @@
 pub mod alpha;
+pub mod alpha_catalog;
 pub mod alpha_eval;
 pub mod alpha_registry;
 pub mod cellset;
@@ -14,6 +15,7 @@ pub mod layout;
 pub mod registry;
 
 pub use alpha::A;
+pub use alpha_catalog::alpha_catalog;
 pub use alpha_registry::{AlphaDescriptor, AlphaRegistry, alpha_registry};
 pub use column_store::ColumnStore;
 pub use compute_alpha::compute_alphas;

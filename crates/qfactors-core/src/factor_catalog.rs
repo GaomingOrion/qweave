@@ -151,7 +151,7 @@ fn param_value(descriptor: &FactorDescriptor, name: &str) -> Option<f64> {
         })
 }
 
-fn list_string_column(name: &str, rows: Vec<Vec<String>>) -> Column {
+pub(crate) fn list_string_column(name: &str, rows: Vec<Vec<String>>) -> Column {
     if rows.is_empty() {
         return Column::new_empty(name.into(), &DataType::List(Box::new(DataType::String)));
     }

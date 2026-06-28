@@ -35,6 +35,10 @@ impl AlphaRegistry {
     pub fn get(&self, name: &str) -> Option<&AlphaDescriptor> {
         self.alphas.get(name)
     }
+
+    pub fn descriptors(&self) -> impl Iterator<Item = &AlphaDescriptor> {
+        self.alphas.values()
+    }
 }
 
 static REGISTRY: OnceLock<AlphaRegistry> = OnceLock::new();

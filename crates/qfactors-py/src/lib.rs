@@ -6,8 +6,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3_polars::{PyDataFrame, PySeries};
 use qfactors_core::{
-    ComputePanelOptions, ComputeResult, ComputeSummary, QFactorsError,
-    compute_panel as compute_panel_core, factor_catalog,
+    ComputePanelOptions, ComputeResult, ComputeSummary, QFactorsError, alpha_catalog,
+    compute_alphas as compute_alphas_core, compute_panel as compute_panel_core, factor_catalog,
 };
 
 #[pyfunction]
@@ -56,6 +56,47 @@ fn factor_catalog_py() -> PyResult<PyDataFrame> {
     factor_catalog().map(PyDataFrame).map_err(to_py_err)
 }
 
+#[pyfunction(name = "compute_alphas", signature = (
+    df,
+    symbol_col,
+    time_col,
+    alphas,
+    observation_times,
+    column_aliases = None,
+    output_path = None
+))]
+#[allow(clippy::too_many_arguments)]
+fn compute_alphas_py(
+    py: Python<'_>,
+    df: PyDataFrame,
+    symbol_col: &str,
+    time_col: &str,
+    alphas: Vec<String>,
+    observation_times: &Bound<'_, PyAny>,
+    column_aliases: Option<HashMap<String, String>>,
+    output_path: Option<&str>,
+) -> PyResult<Py<PyAny>> {
+    let observation_times = observation_series_from_py(py, observation_times)?;
+    let options = ComputePanelOptions {
+        symbol_col: symbol_col.to_string(),
+        time_col: time_col.to_string(),
+        column_aliases: column_aliases.unwrap_or_default(),
+    };
+
+    let result = compute_alphas_core(df.into(), options, alphas, observation_times, output_path)
+        .map_err(to_py_err)?;
+    match result {
+        ComputeResult::Memory(df) => Ok(PyDataFrame(df).into_pyobject(py)?.unbind()),
+        ComputeResult::File(summary) => summary_to_py(py, summary),
+    }
+}
+
+#[pyfunction(name = "alpha_catalog")]
+fn alpha_catalog_py() -> PyResult<PyDataFrame> {
+    qfactors_factors::ensure_linked();
+    alpha_catalog().map(PyDataFrame).map_err(to_py_err)
+}
+
 fn observation_series_from_py(
     py: Python<'_>,
     observation_times: &Bound<'_, PyAny>,
@@ -83,6 +124,8 @@ fn qfactors(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(roundtrip, module)?)?;
     module.add_function(wrap_pyfunction!(compute_panel_py, module)?)?;
     module.add_function(wrap_pyfunction!(factor_catalog_py, module)?)?;
+    module.add_function(wrap_pyfunction!(compute_alphas_py, module)?)?;
+    module.add_function(wrap_pyfunction!(alpha_catalog_py, module)?)?;
     Ok(())
 }
 

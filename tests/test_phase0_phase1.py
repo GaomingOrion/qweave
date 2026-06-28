@@ -122,6 +122,26 @@ def test_factor_catalog_contains_param_factor_and_is_filterable():
     assert selected == ["volume_breakout_20_k15"]
 
 
+def test_alpha_catalog_contains_registered_alphas_and_is_filterable():
+    catalog = qfactors.alpha_catalog()
+
+    row = catalog.filter(pl.col("alpha_name") == "alpha13").row(0, named=True)
+    assert row["expression"] == (
+        "mul(-1, rank(covariance(rank(field(close)), rank(field(volume)), 5)))"
+    )
+    assert row["input_fields"] == ["close", "volume"]
+    assert row["n_inputs"] == 2
+    assert row["lookback"] == 4
+
+    selected = (
+        catalog.filter(pl.col("input_fields").list.contains("close"))
+        .filter(pl.col("lookback") <= 4)
+        .get_column("alpha_name")
+        .to_list()
+    )
+    assert "alpha13" in selected
+
+
 def test_compute_panel_param_factor_matches_python_baseline():
     df = _phase2_input_frame()
 
@@ -180,6 +200,49 @@ def test_compute_panel_file_mode_matches_memory(tmp_path):
             assert actual == pytest.approx(expected)
 
 
+def test_compute_alphas_alpha101_matches_python_baseline():
+    df = _alpha_input_frame()
+
+    out = _compute_alphas(df, observation_times=[2, 1], alphas=["alpha101"])
+
+    assert out.columns == ["time", "asset", "alpha101"]
+    assert out.select(["time", "asset"]).rows() == [
+        (2, "A"),
+        (2, "B"),
+        (1, "A"),
+        (1, "B"),
+    ]
+    expected = [
+        _alpha101_baseline(df, 2, "A"),
+        _alpha101_baseline(df, 2, "B"),
+        _alpha101_baseline(df, 1, "A"),
+        _alpha101_baseline(df, 1, "B"),
+    ]
+    for actual, expected_value in zip(out.get_column("alpha101").to_list(), expected):
+        assert actual == pytest.approx(expected_value)
+
+
+def test_compute_alphas_file_mode_matches_memory(tmp_path):
+    df = _alpha_input_frame()
+    output_path = tmp_path / "alpha_panel.parquet"
+
+    memory = _compute_alphas(df, observation_times=[2], alphas=["alpha101"])
+    summary = _compute_alphas(
+        df,
+        observation_times=[2],
+        alphas=["alpha101"],
+        output_path=str(output_path),
+    )
+    file_out = pl.read_parquet(output_path)
+
+    assert summary == {
+        "output_path": str(output_path),
+        "n_observations": 1,
+        "n_rows": memory.height,
+    }
+    assert file_out.equals(memory)
+
+
 def test_compute_panel_missing_observation_time_outputs_empty_frame(tmp_path):
     df = _phase2_input_frame()
     output_path = tmp_path / "empty_factor_panel.parquet"
@@ -216,6 +279,18 @@ def _compute_panel(df, observation_times, factors, column_aliases=None, output_p
     )
 
 
+def _compute_alphas(df, observation_times, alphas, column_aliases=None, output_path=None):
+    return qfactors.compute_alphas(
+        df,
+        symbol_col="asset",
+        time_col="time",
+        alphas=alphas,
+        observation_times=observation_times,
+        column_aliases=column_aliases,
+        output_path=output_path,
+    )
+
+
 def _phase2_input_frame():
     rows = []
     for asset, multiplier in [("A", 1.0), ("B", 2.0)]:
@@ -231,6 +306,53 @@ def _phase2_input_frame():
             )
     rows.append({"asset": "C", "time": 61, "open": 100.0, "close": 110.0, "volume": 100.0})
     return pl.DataFrame(rows)
+
+
+def _alpha_input_frame():
+    return pl.DataFrame(
+        [
+            {
+                "asset": "B",
+                "time": 2,
+                "open": 21.0,
+                "close": 24.0,
+                "high": 25.0,
+                "low": 20.0,
+                "volume": 110.0,
+                "industry": 1.0,
+            },
+            {
+                "asset": "A",
+                "time": 1,
+                "open": 10.0,
+                "close": 11.0,
+                "high": 12.0,
+                "low": 9.0,
+                "volume": 100.0,
+                "industry": 0.0,
+            },
+            {
+                "asset": "A",
+                "time": 2,
+                "open": 12.0,
+                "close": 15.0,
+                "high": 16.0,
+                "low": 11.0,
+                "volume": 120.0,
+                "industry": 0.0,
+            },
+            {
+                "asset": "B",
+                "time": 1,
+                "open": 20.0,
+                "close": 21.0,
+                "high": 22.0,
+                "low": 19.0,
+                "volume": 90.0,
+                "industry": 1.0,
+            },
+        ]
+    )
 
 
 def _ret_baseline(df, observation_time, asset, open_col, close_col):
@@ -255,3 +377,10 @@ def _volume_breakout_baseline(df, observation_time, asset, window, k):
 
     volume = window_df.get_column("volume").to_list()
     return 1.0 if volume[-1] > k * (sum(volume) / len(volume)) else 0.0
+
+
+def _alpha101_baseline(df, observation_time, asset):
+    row = df.filter((pl.col("asset") == asset) & (pl.col("time") == observation_time)).row(
+        0, named=True
+    )
+    return (row["close"] - row["open"]) / (row["high"] - row["low"] + 0.001)

@@ -26,6 +26,8 @@ pub fn volume_breakout(volume: &[f64], k: f64) -> f64 {
 mod tests {
     use std::cmp::Ordering;
     use std::collections::HashMap;
+    use std::env;
+    use std::time::Instant;
 
     use polars::prelude::*;
     use qfactors_core::{
@@ -383,6 +385,49 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore]
+    fn synthetic_alpha_benchmark() -> qfactors_core::Result<()> {
+        let n_symbols = bench_env_usize("QFACTORS_BENCH_SYMBOLS", 200);
+        let n_times = bench_env_usize("QFACTORS_BENCH_TIMES", 260);
+        let repeats = bench_env_usize("QFACTORS_BENCH_REPEATS", 3);
+        let df = synthetic_alpha_bench_frame(n_symbols, n_times)?;
+        let mut alpha_names = alpha_registry()?
+            .descriptors()
+            .map(|descriptor| descriptor.name.to_string())
+            .collect::<Vec<_>>();
+        alpha_names.sort();
+
+        println!(
+            "manual run: QFACTORS_BENCH_SYMBOLS={n_symbols} QFACTORS_BENCH_TIMES={n_times} \
+             QFACTORS_BENCH_REPEATS={repeats} cargo test -p qfactors-factors \
+             synthetic_alpha_benchmark -- --ignored --nocapture"
+        );
+
+        let started = Instant::now();
+        let mut total_rows = 0usize;
+        for _ in 0..repeats {
+            let out = memory_frame(compute_alphas(
+                df.clone(),
+                options(),
+                alpha_names.clone(),
+                Series::new("time".into(), [n_times as i64]),
+                None,
+            )?)?;
+            total_rows += out.height();
+        }
+        let elapsed = started.elapsed();
+        println!(
+            "compute_alphas synthetic: symbols={n_symbols} times={n_times} \
+             alphas={} repeats={repeats} rows={total_rows} elapsed={elapsed:?} \
+             per_run={:?}",
+            alpha_names.len(),
+            elapsed / repeats as u32
+        );
+
+        Ok(())
+    }
+
     fn memory_frame(result: ComputeResult) -> qfactors_core::Result<DataFrame> {
         match result {
             ComputeResult::Memory(df) => Ok(df),
@@ -396,6 +441,57 @@ mod tests {
             time_col: "time".to_string(),
             column_aliases: HashMap::new(),
         }
+    }
+
+    fn bench_env_usize(name: &str, default: usize) -> usize {
+        env::var(name)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default)
+    }
+
+    fn synthetic_alpha_bench_frame(
+        n_symbols: usize,
+        n_times: usize,
+    ) -> qfactors_core::Result<DataFrame> {
+        let n_rows = n_symbols * n_times;
+        let mut assets = Vec::with_capacity(n_rows);
+        let mut times = Vec::with_capacity(n_rows);
+        let mut open = Vec::with_capacity(n_rows);
+        let mut close = Vec::with_capacity(n_rows);
+        let mut high = Vec::with_capacity(n_rows);
+        let mut low = Vec::with_capacity(n_rows);
+        let mut volume = Vec::with_capacity(n_rows);
+        let mut industry = Vec::with_capacity(n_rows);
+
+        for symbol_idx in 0..n_symbols {
+            for time_idx in 1..=n_times {
+                let symbol = symbol_idx as f64 + 1.0;
+                let time = time_idx as f64;
+                let base = symbol * 10.0 + time * 0.2;
+                let close_value = base * (1.0 + ((time_idx % 11) as f64 - 5.0) * 0.001);
+
+                assets.push(format!("S{symbol_idx:04}"));
+                times.push(time_idx as i64);
+                open.push(base);
+                close.push(close_value);
+                high.push(base.max(close_value) + 1.0 + symbol_idx as f64 * 0.001);
+                low.push(base.min(close_value) - 1.0);
+                volume.push(1_000.0 + symbol * 3.0 + time * 5.0);
+                industry.push((symbol_idx % 11) as f64);
+            }
+        }
+
+        Ok(df!(
+            "asset" => assets,
+            "time" => times,
+            "open" => open,
+            "close" => close,
+            "high" => high,
+            "low" => low,
+            "volume" => volume,
+            "industry" => industry,
+        )?)
     }
 
     struct Alpha8Fixture {

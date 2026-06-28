@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use polars::prelude::*;
+use rayon::prelude::*;
 
 use crate::alpha_eval::{eval, to_cells};
 use crate::alpha_registry::alpha_registry;
@@ -31,7 +32,7 @@ pub fn compute_alphas(
 
     let cs = build_cellset(&df, &options, &fields)?;
     let results = resolved
-        .into_iter()
+        .into_par_iter()
         .map(|(name, expr)| Ok((name, to_cells(eval(&expr, &cs)?, Layout::Tn, &cs))))
         .collect::<Result<Vec<_>>>()?;
     let observations = resolve_alpha_observations(&df, &options.time_col, &cs, observation_times)?;
