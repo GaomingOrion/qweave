@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "qfactors-core"
-version = "0.1.0"
+version = "0.2.0-dev"
 dependencies = [
  "linkme",
  "polars",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "qfactors-factors"
-version = "0.1.0"
+version = "0.2.0-dev"
 dependencies = [
  "linkme",
  "polars",
@@ -2263,7 +2263,7 @@ dependencies = [
 
 [[package]]
 name = "qfactors-macros"
-version = "0.1.0"
+version = "0.2.0-dev"
 dependencies = [
  "linkme",
  "polars",
@@ -2276,7 +2276,7 @@ dependencies = [
 
 [[package]]
 name = "qfactors-py"
-version = "0.1.0"
+version = "0.2.0-dev"
 dependencies = [
  "polars",
  "pyo3",

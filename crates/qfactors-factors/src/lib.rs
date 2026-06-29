@@ -464,6 +464,107 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn all_alphas_golden_matches_frozen_baseline() -> qfactors_core::Result<()> {
+        // Phase 0 safety net: every registered alpha computed on a fixed deterministic
+        // panel must stay numerically stable across the 0.2.x optimization phases.
+        // Baseline frozen at v0.1.0. Re-bless only for an intentional output change:
+        //   GOLDEN_BLESS=1 cargo test -p qfactors-factors all_alphas_golden -- --nocapture
+        let n_symbols = 40;
+        let n_times = 300;
+        let df = synthetic_alpha_bench_frame(n_symbols, n_times)?;
+        let mut alpha_names = alpha_registry()?
+            .descriptors()
+            .map(|descriptor| descriptor.name.to_string())
+            .collect::<Vec<_>>();
+        alpha_names.sort();
+
+        let observation_times = Series::new(
+            "time".into(),
+            [(n_times - 2) as i64, (n_times - 1) as i64, n_times as i64],
+        );
+        let mut out = memory_frame(compute_alphas(
+            df,
+            options(),
+            alpha_names,
+            observation_times,
+            None,
+        )?)?;
+
+        let fixture = format!(
+            "{}/tests/fixtures/golden_alphas.parquet",
+            env!("CARGO_MANIFEST_DIR")
+        );
+
+        if env::var("GOLDEN_BLESS").is_ok() {
+            std::fs::create_dir_all(
+                std::path::Path::new(&fixture)
+                    .parent()
+                    .expect("fixture path has a parent"),
+            )
+            .expect("create fixtures dir");
+            let file = std::fs::File::create(&fixture).expect("create golden fixture");
+            ParquetWriter::new(file)
+                .finish(&mut out)
+                .expect("write golden fixture");
+            println!("blessed golden fixture: {fixture} ({} rows)", out.height());
+            return Ok(());
+        }
+
+        let baseline = ParquetReader::new(
+            std::fs::File::open(&fixture)
+                .expect("golden fixture exists (run once with GOLDEN_BLESS=1)"),
+        )
+        .finish()
+        .expect("read golden fixture");
+
+        assert_golden_within_tol(&out, &baseline, 1e-10, 1e-10);
+        Ok(())
+    }
+
+    fn assert_golden_within_tol(actual: &DataFrame, baseline: &DataFrame, atol: f64, rtol: f64) {
+        assert_eq!(
+            column_names(actual),
+            column_names(baseline),
+            "golden columns drifted; re-bless with GOLDEN_BLESS=1 if intentional"
+        );
+        assert_eq!(actual.height(), baseline.height(), "golden row count drifted");
+
+        for name in actual.get_column_names() {
+            let a = actual.column(name).expect("actual column");
+            let b = baseline.column(name).expect("baseline column");
+
+            if name.as_str() == "time" || name.as_str() == "asset" {
+                assert!(
+                    a.as_materialized_series()
+                        .equals(b.as_materialized_series()),
+                    "golden structural column {name} drifted"
+                );
+                continue;
+            }
+
+            let a = a.try_f64().expect("alpha column is f64");
+            let b = b.try_f64().expect("baseline alpha column is f64");
+            for idx in 0..a.len() {
+                let av = a.get(idx).unwrap_or(f64::NAN);
+                let bv = b.get(idx).unwrap_or(f64::NAN);
+                match (av.is_nan(), bv.is_nan()) {
+                    (true, true) => {}
+                    (false, false) => {
+                        let diff = (av - bv).abs();
+                        assert!(
+                            diff <= atol + rtol * bv.abs(),
+                            "golden drift in {name}[{idx}]: actual={av} baseline={bv} diff={diff}"
+                        );
+                    }
+                    _ => panic!(
+                        "golden NaN-position drift in {name}[{idx}]: actual={av} baseline={bv}"
+                    ),
+                }
+            }
+        }
+    }
+
     fn memory_frame(result: ComputeResult) -> qfactors_core::Result<DataFrame> {
         match result {
             ComputeResult::Memory(df) => Ok(df),

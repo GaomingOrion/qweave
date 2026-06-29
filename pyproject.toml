@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "qfactors"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Rust kernel factor framework for Polars panels"
 requires-python = ">=3.10"
 dependencies = ["polars>=1.0"]
