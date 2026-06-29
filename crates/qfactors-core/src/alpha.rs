@@ -71,6 +71,12 @@ pub fn ts_mean(x: A, d: usize) -> A {
     A(Expr::TsMean(Box::new(x.into_expr()), d))
 }
 
+/// Average daily volume over the past `d` days.
+///
+/// Uses **share** volume (`ts_mean(volume, d)`) by design. Note that WorldQuant's
+/// `adv{d}` is average daily **dollar** volume (volume * price); only when bit-exact
+/// WQ reproduction is required, use `ts_mean(volume() * vwap(), d)` or supply an
+/// `adv{d}` column instead.
 pub fn adv(d: usize) -> A {
     ts_mean(volume(), d)
 }

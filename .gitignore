@@ -1,6 +1,7 @@
 .DS_Store
 docs/
 AGENTS.md
+CLAUDE.md
 target/
 .venv/
 .pytest_cache/
