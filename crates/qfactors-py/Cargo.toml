@@ -18,3 +18,9 @@ pyo3.workspace = true
 pyo3-polars.workspace = true
 qfactors-core = { path = "../qfactors-core" }
 qfactors-factors = { path = "../qfactors-factors" }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+tikv-jemallocator = "0.7.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+mimalloc = "0.1.52"

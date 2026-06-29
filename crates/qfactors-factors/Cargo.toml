@@ -9,3 +9,9 @@ linkme.workspace = true
 polars.workspace = true
 qfactors-core = { path = "../qfactors-core" }
 qfactors-macros = { path = "../qfactors-macros" }
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+tikv-jemallocator = "0.7.0"
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+mimalloc = "0.1.52"

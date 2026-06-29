@@ -10,6 +10,17 @@ use qfactors_core::{
     compute_alphas as compute_alphas_core, compute_panel as compute_panel_core, factor_catalog,
 };
 
+// Rust-side allocations (the large per-node `Vec<f64>` buffers in the alpha engine) go
+// through jemalloc on unix and mimalloc (v3, the crate default) on Windows. This only
+// affects allocations made inside the extension module, not Python's own allocator.
+#[cfg(not(target_os = "windows"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(target_os = "windows")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[pyfunction]
 fn roundtrip(df: PyDataFrame) -> PyDataFrame {
     df

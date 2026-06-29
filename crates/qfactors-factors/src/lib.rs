@@ -1,5 +1,17 @@
 use qfactors_macros::factor;
 
+// Bench/test builds use the same global allocator as the production cdylib so
+// `synthetic_alpha_benchmark` numbers reflect jemalloc/mimalloc. `cfg(test)` keeps it out
+// of the library object linked into qfactors-py (which sets its own), avoiding a duplicate
+// `#[global_allocator]`.
+#[cfg(all(test, not(target_os = "windows")))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(all(test, target_os = "windows"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod alphas;
 pub mod worldquant101;
 
