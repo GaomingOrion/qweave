@@ -168,10 +168,8 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
         Expr::Abs(inner) => eval_unary(inner, cs, f64::abs),
         Expr::Log(inner) => eval_unary(inner, cs, log_value),
         Expr::Sign(inner) => eval_unary(inner, cs, sign),
-        Expr::SignedPower(inner, exponent) => {
-            eval_unary(inner, cs, |value| signed_power(value, *exponent))
-        }
-        Expr::Power(inner, exponent) => eval_unary(inner, cs, |value| value.powf(*exponent)),
+        Expr::SignedPower(lhs, rhs) => eval_binary(lhs, rhs, cs, signed_power),
+        Expr::Power(lhs, rhs) => eval_binary(lhs, rhs, cs, |value, exponent| value.powf(exponent)),
         Expr::Min(lhs, rhs) => eval_binary(lhs, rhs, cs, min_value),
         Expr::Max(lhs, rhs) => eval_binary(lhs, rhs, cs, max_value),
         Expr::Cmp(op, lhs, rhs) => eval_binary(lhs, rhs, cs, |lhs, rhs| cmp_value(*op, lhs, rhs)),
@@ -635,7 +633,7 @@ fn sign(value: f64) -> f64 {
 }
 
 fn signed_power(value: f64, exponent: f64) -> f64 {
-    if value.is_nan() {
+    if value.is_nan() || exponent.is_nan() {
         f64::NAN
     } else {
         sign(value) * value.abs().powf(exponent)
@@ -998,6 +996,7 @@ mod tests {
             HashMap::from([
                 ("x".to_string(), vec![-2.0, 0.0, 3.0, f64::NAN]),
                 ("y".to_string(), vec![1.0, -1.0, 3.0, 5.0]),
+                ("exp".to_string(), vec![2.0, 3.0, 0.5, 2.0]),
             ]),
             vec![0..1, 1..2, 2..3, 3..4],
             one_block(0..4),
@@ -1027,7 +1026,10 @@ mod tests {
         assert_vec_close(
             &cells(
                 eval(
-                    &Expr::SignedPower(Box::new(Expr::Field("x".to_string())), 2.0),
+                    &Expr::SignedPower(
+                        Box::new(Expr::Field("x".to_string())),
+                        Box::new(Expr::Const(2.0)),
+                    ),
                     &cs,
                 )?,
                 &cs,
@@ -1037,12 +1039,15 @@ mod tests {
         assert_vec_close(
             &cells(
                 eval(
-                    &Expr::Power(Box::new(Expr::Field("x".to_string())), 0.5),
+                    &Expr::Power(
+                        Box::new(Expr::Field("x".to_string())),
+                        Box::new(Expr::Field("exp".to_string())),
+                    ),
                     &cs,
                 )?,
                 &cs,
             ),
-            &[f64::NAN, 0.0, 3.0_f64.sqrt(), f64::NAN],
+            &[4.0, 0.0, 3.0_f64.sqrt(), f64::NAN],
         );
         assert_vec_close(
             &cells(

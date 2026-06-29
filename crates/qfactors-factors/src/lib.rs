@@ -1,6 +1,7 @@
 use qfactors_macros::factor;
 
 pub mod alphas;
+pub mod worldquant101;
 
 pub fn ensure_linked() {}
 
@@ -247,6 +248,41 @@ mod tests {
     }
 
     #[test]
+    fn worldquant101_alphas_are_registered_and_run_on_complete_synthetic_panel()
+    -> qfactors_core::Result<()> {
+        let registry = alpha_registry()?;
+        let alpha_names = (1..=101)
+            .map(|idx| format!("alpha{idx}"))
+            .collect::<Vec<_>>();
+        for name in &alpha_names {
+            assert!(registry.get(name).is_some(), "{name} is registered");
+        }
+
+        let n_symbols = 6;
+        let n_times = 260;
+        let out = memory_frame(compute_alphas(
+            synthetic_alpha_bench_frame(n_symbols, n_times)?,
+            options(),
+            alpha_names.clone(),
+            Series::new("time".into(), [n_times as i64]),
+            None,
+        )?)?;
+
+        let expected_columns = ["time".to_string(), "asset".to_string()]
+            .into_iter()
+            .chain(alpha_names)
+            .collect::<Vec<_>>();
+        assert_eq!(column_names(&out), expected_columns);
+        assert_eq!(
+            time_asset_rows(&out)?,
+            (0..n_symbols)
+                .map(|symbol_idx| (n_times as i64, format!("S{symbol_idx:04}")))
+                .collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn alpha8_end_to_end_matches_reference_and_compact_edges() -> qfactors_core::Result<()> {
         let fixture = alpha8_fixture()?;
         let expected = reference_alpha8(&fixture);
@@ -462,7 +498,11 @@ mod tests {
         let mut high = Vec::with_capacity(n_rows);
         let mut low = Vec::with_capacity(n_rows);
         let mut volume = Vec::with_capacity(n_rows);
+        let mut vwap = Vec::with_capacity(n_rows);
+        let mut cap = Vec::with_capacity(n_rows);
+        let mut sector = Vec::with_capacity(n_rows);
         let mut industry = Vec::with_capacity(n_rows);
+        let mut subindustry = Vec::with_capacity(n_rows);
 
         for symbol_idx in 0..n_symbols {
             for time_idx in 1..=n_times {
@@ -470,15 +510,22 @@ mod tests {
                 let time = time_idx as f64;
                 let base = symbol * 10.0 + time * 0.2;
                 let close_value = base * (1.0 + ((time_idx % 11) as f64 - 5.0) * 0.001);
+                let high_value = base.max(close_value) + 1.0 + symbol_idx as f64 * 0.001;
+                let low_value = base.min(close_value) - 1.0;
+                let volume_value = 1_000.0 + symbol * 3.0 + time * 5.0;
 
                 assets.push(format!("S{symbol_idx:04}"));
                 times.push(time_idx as i64);
                 open.push(base);
                 close.push(close_value);
-                high.push(base.max(close_value) + 1.0 + symbol_idx as f64 * 0.001);
-                low.push(base.min(close_value) - 1.0);
-                volume.push(1_000.0 + symbol * 3.0 + time * 5.0);
-                industry.push((symbol_idx % 11) as f64);
+                high.push(high_value);
+                low.push(low_value);
+                volume.push(volume_value);
+                vwap.push((high_value + low_value + close_value) / 3.0);
+                cap.push(close_value * (1_000_000.0 + symbol * 10_000.0));
+                sector.push((symbol_idx % 2) as f64);
+                industry.push((symbol_idx % 3) as f64);
+                subindustry.push((symbol_idx % 3) as f64);
             }
         }
 
@@ -490,7 +537,11 @@ mod tests {
             "high" => high,
             "low" => low,
             "volume" => volume,
+            "vwap" => vwap,
+            "cap" => cap,
+            "sector" => sector,
             "industry" => industry,
+            "subindustry" => subindustry,
         )?)
     }
 

@@ -142,6 +142,17 @@ def test_alpha_catalog_contains_registered_alphas_and_is_filterable():
     assert "alpha13" in selected
 
 
+def test_alpha_catalog_contains_worldquant101_set():
+    catalog = qfactors.alpha_catalog()
+
+    names = set(catalog.get_column("alpha_name").to_list())
+    assert {f"alpha{idx}" for idx in range(1, 102)}.issubset(names)
+
+    alpha100 = catalog.filter(pl.col("alpha_name") == "alpha100").row(0, named=True)
+    assert "subindustry" in alpha100["input_fields"]
+    assert "volume" in alpha100["input_fields"]
+
+
 def test_compute_panel_param_factor_matches_python_baseline():
     df = _phase2_input_frame()
 
@@ -241,6 +252,24 @@ def test_compute_alphas_file_mode_matches_memory(tmp_path):
         "n_rows": memory.height,
     }
     assert file_out.equals(memory)
+
+
+def test_compute_alphas_worldquant101_representative_extra_fields_smoke():
+    df = _worldquant_input_frame(n_times=40)
+
+    out = _compute_alphas(
+        df,
+        observation_times=[40],
+        alphas=["alpha5", "alpha56", "alpha58", "alpha80"],
+    )
+
+    assert out.columns == ["time", "asset", "alpha5", "alpha56", "alpha58", "alpha80"]
+    assert out.select(["time", "asset"]).rows() == [
+        (40, "A"),
+        (40, "B"),
+        (40, "C"),
+        (40, "D"),
+    ]
 
 
 def test_compute_panel_missing_observation_time_outputs_empty_frame(tmp_path):
@@ -353,6 +382,33 @@ def _alpha_input_frame():
             },
         ]
     )
+
+
+def _worldquant_input_frame(n_times):
+    rows = []
+    for asset_idx, asset in enumerate(["A", "B", "C", "D"]):
+        for time in range(1, n_times + 1):
+            base = 10.0 * (asset_idx + 1) + time * 0.2
+            close = base * (1.0 + ((time % 7) - 3) * 0.001)
+            high = max(base, close) + 1.0 + asset_idx * 0.01
+            low = min(base, close) - 1.0
+            rows.append(
+                {
+                    "asset": asset,
+                    "time": time,
+                    "open": base,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": 1_000.0 + asset_idx * 17.0 + time * 3.0,
+                    "vwap": (high + low + close) / 3.0,
+                    "cap": close * (1_000_000.0 + asset_idx * 100_000.0),
+                    "sector": float(asset_idx % 2),
+                    "industry": float(asset_idx % 2),
+                    "subindustry": float(asset_idx % 2),
+                }
+            )
+    return pl.DataFrame(rows)
 
 
 def _ret_baseline(df, observation_time, asset, open_col, close_col):

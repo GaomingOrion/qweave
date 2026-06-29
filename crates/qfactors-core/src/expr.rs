@@ -40,8 +40,8 @@ pub enum Expr {
     Abs(Box<Expr>),
     Log(Box<Expr>),
     Sign(Box<Expr>),
-    SignedPower(Box<Expr>, f64),
-    Power(Box<Expr>, f64),
+    SignedPower(Box<Expr>, Box<Expr>),
+    Power(Box<Expr>, Box<Expr>),
     Min(Box<Expr>, Box<Expr>),
     Max(Box<Expr>, Box<Expr>),
     Cmp(CmpOp, Box<Expr>, Box<Expr>),
@@ -119,7 +119,9 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::GroupRank(lhs, rhs)
         | Expr::GroupNeutralize(lhs, rhs)
         | Expr::Correlation(lhs, rhs, _)
-        | Expr::Covariance(lhs, rhs, _) => {
+        | Expr::Covariance(lhs, rhs, _)
+        | Expr::SignedPower(lhs, rhs)
+        | Expr::Power(lhs, rhs) => {
             collect_fields(lhs, out);
             collect_fields(rhs, out);
         }
@@ -145,9 +147,7 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::Scale(inner, _)
         | Expr::Abs(inner)
         | Expr::Log(inner)
-        | Expr::Sign(inner)
-        | Expr::SignedPower(inner, _)
-        | Expr::Power(inner, _) => {
+        | Expr::Sign(inner) => {
             collect_fields(inner, out);
         }
     }
@@ -178,7 +178,9 @@ pub(crate) fn lookback_depth(expr: &Expr) -> usize {
         | Expr::Max(lhs, rhs)
         | Expr::Cmp(_, lhs, rhs)
         | Expr::GroupRank(lhs, rhs)
-        | Expr::GroupNeutralize(lhs, rhs) => lookback_depth(lhs).max(lookback_depth(rhs)),
+        | Expr::GroupNeutralize(lhs, rhs)
+        | Expr::SignedPower(lhs, rhs)
+        | Expr::Power(lhs, rhs) => lookback_depth(lhs).max(lookback_depth(rhs)),
         Expr::Where(cond, when_true, when_false) => lookback_depth(cond)
             .max(lookback_depth(when_true))
             .max(lookback_depth(when_false)),
@@ -187,9 +189,7 @@ pub(crate) fn lookback_depth(expr: &Expr) -> usize {
         | Expr::Scale(inner, _)
         | Expr::Abs(inner)
         | Expr::Log(inner)
-        | Expr::Sign(inner)
-        | Expr::SignedPower(inner, _)
-        | Expr::Power(inner, _) => lookback_depth(inner),
+        | Expr::Sign(inner) => lookback_depth(inner),
     }
 }
 

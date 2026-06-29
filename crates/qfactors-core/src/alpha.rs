@@ -11,6 +11,26 @@ impl A {
     }
 }
 
+pub trait IntoAlphaExpr {
+    fn into_alpha_expr(self) -> Expr;
+}
+
+impl IntoAlphaExpr for A {
+    fn into_alpha_expr(self) -> Expr {
+        self.into_expr()
+    }
+}
+
+impl IntoAlphaExpr for f64 {
+    fn into_alpha_expr(self) -> Expr {
+        Expr::Const(self)
+    }
+}
+
+pub fn constant(value: f64) -> A {
+    A(Expr::Const(value))
+}
+
 pub fn field(name: &str) -> A {
     A(Expr::Field(name.to_string()))
 }
@@ -163,12 +183,18 @@ pub fn sign(x: A) -> A {
     A(Expr::Sign(Box::new(x.into_expr())))
 }
 
-pub fn signedpower(x: A, a: f64) -> A {
-    A(Expr::SignedPower(Box::new(x.into_expr()), a))
+pub fn signedpower(x: A, a: impl IntoAlphaExpr) -> A {
+    A(Expr::SignedPower(
+        Box::new(x.into_expr()),
+        Box::new(a.into_alpha_expr()),
+    ))
 }
 
-pub fn power(x: A, a: f64) -> A {
-    A(Expr::Power(Box::new(x.into_expr()), a))
+pub fn power(x: A, a: impl IntoAlphaExpr) -> A {
+    A(Expr::Power(
+        Box::new(x.into_expr()),
+        Box::new(a.into_alpha_expr()),
+    ))
 }
 
 pub fn min(x: A, y: A) -> A {
@@ -365,6 +391,21 @@ mod tests {
                 )),
                 Box::new(Expr::Field("high".to_string())),
                 Box::new(Expr::Field("low".to_string())),
+            )
+        );
+        assert_eq!(constant(2.0).into_expr(), Expr::Const(2.0));
+        assert_eq!(
+            power(close(), 2.0).into_expr(),
+            Expr::Power(
+                Box::new(Expr::Field("close".to_string())),
+                Box::new(Expr::Const(2.0)),
+            )
+        );
+        assert_eq!(
+            signedpower(close(), delta(volume(), 1)).into_expr(),
+            Expr::SignedPower(
+                Box::new(Expr::Field("close".to_string())),
+                Box::new(Expr::Delta(Box::new(Expr::Field("volume".to_string())), 1)),
             )
         );
     }
