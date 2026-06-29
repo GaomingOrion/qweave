@@ -63,6 +63,9 @@ pub enum QFactorsError {
     #[error("output column `{0}` conflicts with another output column")]
     OutputColumnConflict(String),
 
+    #[error("invalid QF_ENGINE `{0}`; expected `tree` or `dag`")]
+    InvalidAlphaEngine(String),
+
     #[error("factor `{factor_name}` returned {actual} columns; expected {expected}")]
     FactorOutputCount {
         factor_name: &'static str,

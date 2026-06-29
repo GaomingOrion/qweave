@@ -1,8 +1,10 @@
 use std::collections::{BTreeSet, HashSet};
+use std::env;
 
 use polars::prelude::*;
 use rayon::prelude::*;
 
+use crate::alpha_dag::eval_alphas as eval_alphas_dag;
 use crate::alpha_eval::{eval, to_cells};
 use crate::alpha_registry::alpha_registry;
 use crate::cellset::{CellSet, build_cellset};
@@ -11,6 +13,11 @@ use crate::compute_sink::{ComputeResult, ComputeSink};
 use crate::error::{QFactorsError, Result};
 use crate::expr::{Expr, collect_fields};
 use crate::layout::Layout;
+
+enum AlphaEngine {
+    Tree,
+    Dag,
+}
 
 struct ResolvedAlphaObservations {
     values: Column,
@@ -31,10 +38,10 @@ pub fn compute_alphas(
     }
 
     let cs = build_cellset(&df, &options, &fields)?;
-    let results = resolved
-        .into_par_iter()
-        .map(|(name, expr)| Ok((name, to_cells(eval(&expr, &cs)?, Layout::Tn, &cs))))
-        .collect::<Result<Vec<_>>>()?;
+    let results = match alpha_engine()? {
+        AlphaEngine::Tree => eval_alphas_tree(resolved, &cs)?,
+        AlphaEngine::Dag => eval_alphas_dag(&resolved, &cs)?,
+    };
     let observations = resolve_alpha_observations(&df, &options.time_col, &cs, observation_times)?;
 
     let mut sink = ComputeSink::for_output(output_path);
@@ -51,6 +58,28 @@ pub fn compute_alphas(
     }
 
     sink.finish()
+}
+
+fn alpha_engine() -> Result<AlphaEngine> {
+    match env::var("QF_ENGINE") {
+        Ok(value) if value == "dag" => Ok(AlphaEngine::Dag),
+        Ok(value) if value == "tree" => Ok(AlphaEngine::Tree),
+        Ok(value) => Err(QFactorsError::InvalidAlphaEngine(value)),
+        Err(env::VarError::NotPresent) => Ok(AlphaEngine::Tree),
+        Err(env::VarError::NotUnicode(value)) => Err(QFactorsError::InvalidAlphaEngine(
+            value.to_string_lossy().into_owned(),
+        )),
+    }
+}
+
+fn eval_alphas_tree(
+    resolved: Vec<(String, Expr)>,
+    cs: &CellSet,
+) -> Result<Vec<(String, Vec<f64>)>> {
+    resolved
+        .into_par_iter()
+        .map(|(name, expr)| Ok((name, to_cells(eval(&expr, cs)?, Layout::Tn, cs))))
+        .collect()
 }
 
 fn resolve_alphas(

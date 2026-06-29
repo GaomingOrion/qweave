@@ -17,9 +17,8 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
         Expr::Field(name) => cs
             .fields
             .get(name)
-            .cloned()
             .map(|values| Val::Cells {
-                values,
+                values: values.as_ref().clone(),
                 layout: Layout::Nt,
             })
             .ok_or_else(|| QFactorsError::MissingColumn(name.clone())),
@@ -265,7 +264,7 @@ fn eval_where(cond: &Expr, when_true: &Expr, when_false: &Expr, cs: &CellSet) ->
     })
 }
 
-fn delay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn delay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     let mut out = vec![f64::NAN; values.len()];
     for block in &cs.sym_blocks {
         for local_idx in days..block.len() {
@@ -682,7 +681,7 @@ fn xs_per_group(
     out
 }
 
-fn delta(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn delta(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     let mut out = vec![f64::NAN; values.len()];
 
     for block in &cs.sym_blocks {
@@ -699,29 +698,29 @@ fn delta(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     out
 }
 
-fn ts_sum(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_sum(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_rolling_value::<RollingSum>(values, days, cs, |window| window.iter().sum())
 }
 
-fn ts_mean(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_mean(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_rolling_value::<RollingMean>(values, days, cs, |window| {
         window.iter().sum::<f64>() / window.len() as f64
     })
 }
 
-fn product(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn product(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, |window| window.iter().product())
 }
 
-fn ts_min(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_min(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_deque_window(values, days, cs, |back, current| back >= current)
 }
 
-fn ts_max(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_max(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_deque_window(values, days, cs, |back, current| back <= current)
 }
 
-fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, |window| {
         let mut best_days_ago = 0usize;
         let mut best_value = window[window.len() - 1];
@@ -736,7 +735,7 @@ fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     })
 }
 
-fn ts_argmax(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_argmax(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, |window| {
         let mut best_days_ago = 0usize;
         let mut best_value = window[window.len() - 1];
@@ -751,11 +750,11 @@ fn ts_argmax(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     })
 }
 
-fn ts_rank(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_rank(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, rank_last)
 }
 
-fn ts_std(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn ts_std(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_rolling_value::<RollingVar>(values, days, cs, |window| {
         if window.len() < 2 {
             return f64::NAN;
@@ -773,7 +772,7 @@ fn ts_std(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     })
 }
 
-fn decay_linear(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn decay_linear(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_rolling_decay(values, days, cs)
 }
 
@@ -786,19 +785,19 @@ fn decay_linear_window(window: &[f64]) -> f64 {
     weighted / (window.len() * (window.len() + 1) / 2) as f64
 }
 
-fn correlation(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn correlation(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window2(lhs, rhs, days, cs, correlation_window)
 }
 
-fn covariance(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn covariance(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window2(lhs, rhs, days, cs, covariance_window)
 }
 
-fn rank(values: &[f64], cs: &CellSet) -> Vec<f64> {
+pub(crate) fn rank(values: &[f64], cs: &CellSet) -> Vec<f64> {
     xs_per_block(values, cs, rank_pairs)
 }
 
-fn scale(values: &[f64], scale_to: f64, cs: &CellSet) -> Vec<f64> {
+pub(crate) fn scale(values: &[f64], scale_to: f64, cs: &CellSet) -> Vec<f64> {
     xs_per_block(values, cs, |present| {
         let denom = present.iter().map(|(_, value)| value.abs()).sum::<f64>();
         if denom == 0.0 {
@@ -811,11 +810,11 @@ fn scale(values: &[f64], scale_to: f64, cs: &CellSet) -> Vec<f64> {
     })
 }
 
-fn group_rank(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
+pub(crate) fn group_rank(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
     xs_per_group(values, groups, cs, rank_pairs)
 }
 
-fn group_neutralize(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
+pub(crate) fn group_neutralize(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
     xs_per_group(values, groups, cs, |present| {
         let mean = present.iter().map(|(_, value)| value).sum::<f64>() / present.len() as f64;
         present
@@ -901,11 +900,11 @@ fn correlation_window(lhs: &[f64], rhs: &[f64]) -> f64 {
     }
 }
 
-fn log_value(value: f64) -> f64 {
+pub(crate) fn log_value(value: f64) -> f64 {
     if value > 0.0 { value.ln() } else { f64::NAN }
 }
 
-fn sign(value: f64) -> f64 {
+pub(crate) fn sign(value: f64) -> f64 {
     if value.is_nan() {
         f64::NAN
     } else if value > 0.0 {
@@ -917,7 +916,7 @@ fn sign(value: f64) -> f64 {
     }
 }
 
-fn signed_power(value: f64, exponent: f64) -> f64 {
+pub(crate) fn signed_power(value: f64, exponent: f64) -> f64 {
     if value.is_nan() || exponent.is_nan() {
         f64::NAN
     } else {
@@ -925,7 +924,7 @@ fn signed_power(value: f64, exponent: f64) -> f64 {
     }
 }
 
-fn min_value(lhs: f64, rhs: f64) -> f64 {
+pub(crate) fn min_value(lhs: f64, rhs: f64) -> f64 {
     if lhs.is_nan() || rhs.is_nan() {
         f64::NAN
     } else {
@@ -933,7 +932,7 @@ fn min_value(lhs: f64, rhs: f64) -> f64 {
     }
 }
 
-fn max_value(lhs: f64, rhs: f64) -> f64 {
+pub(crate) fn max_value(lhs: f64, rhs: f64) -> f64 {
     if lhs.is_nan() || rhs.is_nan() {
         f64::NAN
     } else {
@@ -941,7 +940,7 @@ fn max_value(lhs: f64, rhs: f64) -> f64 {
     }
 }
 
-fn cmp_value(op: CmpOp, lhs: f64, rhs: f64) -> f64 {
+pub(crate) fn cmp_value(op: CmpOp, lhs: f64, rhs: f64) -> f64 {
     if lhs.is_nan() || rhs.is_nan() {
         return f64::NAN;
     }
@@ -955,7 +954,7 @@ fn cmp_value(op: CmpOp, lhs: f64, rhs: f64) -> f64 {
     if is_true { 1.0 } else { 0.0 }
 }
 
-fn where_value(cond: f64, when_true: f64, when_false: f64) -> f64 {
+pub(crate) fn where_value(cond: f64, when_true: f64, when_false: f64) -> f64 {
     if cond.is_nan() {
         f64::NAN
     } else if cond > 0.0 {
@@ -969,6 +968,7 @@ fn where_value(cond: f64, when_true: f64, when_false: f64) -> f64 {
 mod tests {
     use std::collections::HashMap;
     use std::ops::Range;
+    use std::sync::Arc;
 
     use polars::prelude::*;
 
@@ -997,7 +997,10 @@ mod tests {
             sym_blocks,
             time_blocks,
             tn_order: (0..n_cells).collect(),
-            fields,
+            fields: fields
+                .into_iter()
+                .map(|(name, values)| (name, Arc::new(values)))
+                .collect(),
             symbols_tn: Column::new("asset".into(), vec!["A"; n_cells]),
             times_tn: Column::new("time".into(), (0..n_cells as i64).collect::<Vec<_>>()),
             time_block_by_value: HashMap::new(),

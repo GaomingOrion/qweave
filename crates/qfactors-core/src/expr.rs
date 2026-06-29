@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CmpOp {
     Lt,
     Gt,

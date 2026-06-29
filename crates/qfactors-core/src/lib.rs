@@ -1,5 +1,6 @@
 pub mod alpha;
 pub mod alpha_catalog;
+pub(crate) mod alpha_dag;
 pub mod alpha_eval;
 pub mod alpha_registry;
 pub mod cellset;

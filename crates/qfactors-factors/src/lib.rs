@@ -540,7 +540,11 @@ mod tests {
             column_names(baseline),
             "golden columns drifted; re-bless with GOLDEN_BLESS=1 if intentional"
         );
-        assert_eq!(actual.height(), baseline.height(), "golden row count drifted");
+        assert_eq!(
+            actual.height(),
+            baseline.height(),
+            "golden row count drifted"
+        );
 
         for name in actual.get_column_names() {
             let a = actual.column(name).expect("actual column");

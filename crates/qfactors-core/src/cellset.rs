@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
+use std::sync::Arc;
 
 use polars::prelude::*;
 
@@ -16,7 +17,7 @@ pub struct CellSet {
     pub sym_blocks: Vec<Range<usize>>,
     pub time_blocks: Vec<Range<usize>>,
     pub tn_order: Vec<usize>,
-    pub fields: HashMap<String, Vec<f64>>,
+    pub fields: HashMap<String, Arc<Vec<f64>>>,
     pub symbols_tn: Column,
     pub times_tn: Column,
     pub time_block_by_value: HashMap<AnyValue<'static>, usize>,
@@ -96,7 +97,7 @@ fn build_fields(
     df: &DataFrame,
     options: &ComputePanelOptions,
     fields: &BTreeSet<String>,
-) -> Result<HashMap<String, Vec<f64>>> {
+) -> Result<HashMap<String, Arc<Vec<f64>>>> {
     let mut out = HashMap::with_capacity(fields.len());
     for logical_name in fields {
         let column_name = options
@@ -113,7 +114,7 @@ fn build_fields(
             .iter()
             .map(|value| value.unwrap_or(f64::NAN))
             .collect::<Vec<_>>();
-        out.insert(logical_name.clone(), values);
+        out.insert(logical_name.clone(), Arc::new(values));
     }
     Ok(out)
 }
@@ -197,7 +198,7 @@ mod tests {
         assert_eq!(cs.sym_blocks, [0..1, 1..3]);
         assert_eq!(cs.tn_order, [1, 0, 2]);
         assert_eq!(cs.time_blocks, [0..1, 1..3]);
-        assert_eq!(cs.fields["open"], [10.0, 20.0, 21.0]);
+        assert_eq!(cs.fields["open"].as_slice(), [10.0, 20.0, 21.0]);
         assert_eq!(
             cs.symbols_tn
                 .try_str()
