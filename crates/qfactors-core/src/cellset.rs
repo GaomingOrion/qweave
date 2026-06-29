@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 
@@ -8,6 +7,8 @@ use crate::column_store::ensure_dtype;
 use crate::compute_panel::{ComputePanelOptions, sort_panel, validate_structural_column};
 use crate::error::{QFactorsError, Result};
 use crate::factor::DType;
+
+const NT_INDEX: &str = "__qfactors_nt_index";
 
 #[derive(Debug, Clone)]
 pub struct CellSet {
@@ -38,30 +39,26 @@ pub fn build_cellset(
     validate_fields(df, options, fields)?;
 
     let sorted = sort_panel(df, options)?;
-    let symbols_nt = values(&sorted, &options.symbol_col)?;
-    let times_nt = values(&sorted, &options.time_col)?;
-    let sym_blocks = sym_blocks(
-        &symbols_nt,
-        &options.symbol_col,
-        &times_nt,
-        &options.time_col,
-    )?;
-    let tn_order = tn_order(
-        &symbols_nt,
-        &options.symbol_col,
-        &times_nt,
-        &options.time_col,
-    )?;
-    let (time_blocks, time_block_by_value) = time_blocks(&tn_order, &times_nt);
+    let sym_blocks = sym_blocks(&sorted, options)?;
 
-    let tn_indices = tn_order
-        .iter()
-        .map(|&idx| idx as IdxSize)
+    // TN (time, symbol) ordering via polars' typed, multi-threaded sort instead of a
+    // single-threaded `AnyValue` comparison sort. The row-index column, read back in the
+    // sorted order, is exactly the NT->TN permutation.
+    let tn_sorted = sorted.with_row_index(NT_INDEX.into(), None)?.sort(
+        [&options.time_col, &options.symbol_col],
+        SortMultipleOptions::default(),
+    )?;
+    let tn_order = tn_sorted
+        .column(NT_INDEX)?
+        .as_materialized_series()
+        .idx()?
+        .into_no_null_iter()
+        .map(|idx| idx as usize)
         .collect::<Vec<_>>();
-    let symbols_tn = sorted
-        .column(&options.symbol_col)?
-        .take_slice(&tn_indices)?;
-    let times_tn = sorted.column(&options.time_col)?.take_slice(&tn_indices)?;
+    let symbols_tn = tn_sorted.column(&options.symbol_col)?.clone();
+    let times_tn = tn_sorted.column(&options.time_col)?.clone();
+    let (time_blocks, time_block_by_value) = time_blocks(&times_tn)?;
+
     let fields = build_fields(&sorted, options, fields)?;
 
     Ok(CellSet {
@@ -121,111 +118,55 @@ fn build_fields(
     Ok(out)
 }
 
-fn values(df: &DataFrame, column: &str) -> Result<Vec<AnyValue<'static>>> {
-    let column = df.column(column)?;
-    (0..column.len())
-        .map(|row| Ok(column.get(row)?.into_static()))
-        .collect()
-}
+fn sym_blocks(sorted: &DataFrame, options: &ComputePanelOptions) -> Result<Vec<Range<usize>>> {
+    let n_cells = sorted.height();
+    let symbol = sorted.column(&options.symbol_col)?.as_materialized_series();
+    let time = sorted.column(&options.time_col)?.as_materialized_series();
+    let symbol_changed = symbol.not_equal_missing(&symbol.shift(1))?;
+    let time_changed = time.not_equal_missing(&time.shift(1))?;
 
-fn sym_blocks(
-    symbols: &[AnyValue<'static>],
-    symbol_col: &str,
-    times: &[AnyValue<'static>],
-    time_col: &str,
-) -> Result<Vec<Range<usize>>> {
     let mut blocks = Vec::new();
     let mut start = 0usize;
-
-    for row in 1..symbols.len() {
-        match cmp_values(&symbols[row], &symbols[row - 1], symbol_col)? {
-            Ordering::Equal => {
-                if cmp_values(&times[row], &times[row - 1], time_col)? == Ordering::Equal {
-                    return Err(QFactorsError::DuplicateSymbolTime {
-                        symbol_col: symbol_col.to_string(),
-                        time_col: time_col.to_string(),
-                    });
-                }
-            }
-            _ => {
-                blocks.push(start..row);
-                start = row;
-            }
+    for row in 1..n_cells {
+        if symbol_changed.get(row).unwrap_or(true) {
+            blocks.push(start..row);
+            start = row;
+        } else if !time_changed.get(row).unwrap_or(true) {
+            return Err(QFactorsError::DuplicateSymbolTime {
+                symbol_col: options.symbol_col.clone(),
+                time_col: options.time_col.clone(),
+            });
         }
     }
-
-    if !symbols.is_empty() {
-        blocks.push(start..symbols.len());
+    if n_cells > 0 {
+        blocks.push(start..n_cells);
     }
     Ok(blocks)
 }
 
-fn tn_order(
-    symbols: &[AnyValue<'static>],
-    symbol_col: &str,
-    times: &[AnyValue<'static>],
-    time_col: &str,
-) -> Result<Vec<usize>> {
-    let mut order = (0..symbols.len()).collect::<Vec<_>>();
-    let mut sort_error = None;
-    order.sort_by(|&lhs, &rhs| {
-        let time_order = cmp_values(&times[lhs], &times[rhs], time_col);
-        let time_order = match time_order {
-            Ok(ordering) => ordering,
-            Err(err) => {
-                sort_error = Some(err);
-                Ordering::Equal
-            }
-        };
-        if time_order != Ordering::Equal {
-            return time_order;
-        }
-
-        match cmp_values(&symbols[lhs], &symbols[rhs], symbol_col) {
-            Ok(ordering) => ordering,
-            Err(err) => {
-                sort_error = Some(err);
-                Ordering::Equal
-            }
-        }
-    });
-
-    if let Some(err) = sort_error {
-        return Err(err);
-    }
-    Ok(order)
-}
+type TimeBlocks = (Vec<Range<usize>>, HashMap<AnyValue<'static>, usize>);
 
 #[allow(clippy::mutable_key_type)]
-fn time_blocks(
-    tn_order: &[usize],
-    times: &[AnyValue<'static>],
-) -> (Vec<Range<usize>>, HashMap<AnyValue<'static>, usize>) {
+fn time_blocks(times_tn: &Column) -> Result<TimeBlocks> {
+    let n_cells = times_tn.len();
+    let series = times_tn.as_materialized_series();
+    let changed = series.not_equal_missing(&series.shift(1))?;
+
     let mut blocks = Vec::new();
     let mut by_value = HashMap::new();
     let mut start = 0usize;
-
-    for row in 1..tn_order.len() {
-        if times[tn_order[row]] != times[tn_order[start]] {
-            by_value.insert(times[tn_order[start]].clone(), blocks.len());
+    for row in 1..n_cells {
+        if changed.get(row).unwrap_or(true) {
+            by_value.insert(times_tn.get(start)?.into_static(), blocks.len());
             blocks.push(start..row);
             start = row;
         }
     }
-
-    if !tn_order.is_empty() {
-        by_value.insert(times[tn_order[start]].clone(), blocks.len());
-        blocks.push(start..tn_order.len());
+    if n_cells > 0 {
+        by_value.insert(times_tn.get(start)?.into_static(), blocks.len());
+        blocks.push(start..n_cells);
     }
-
-    (blocks, by_value)
-}
-
-fn cmp_values(lhs: &AnyValue<'_>, rhs: &AnyValue<'_>, column: &str) -> Result<Ordering> {
-    lhs.partial_cmp(rhs)
-        .ok_or_else(|| QFactorsError::NonComparableColumn {
-            column: column.to_string(),
-        })
+    Ok((blocks, by_value))
 }
 
 #[cfg(test)]
