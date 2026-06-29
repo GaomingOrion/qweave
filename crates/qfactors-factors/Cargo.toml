@@ -1,8 +1,15 @@
 [package]
 name = "qfactors-factors"
 version = "0.2.0-dev"
+description = "Built-in qfactors factor and WorldQuant 101 definitions"
+authors.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 linkme.workspace = true

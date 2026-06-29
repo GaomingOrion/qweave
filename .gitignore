@@ -1,5 +1,4 @@
 .DS_Store
-docs/
 AGENTS.md
 CLAUDE.md
 target/
@@ -7,3 +6,5 @@ target/
 .pytest_cache/
 __pycache__/
 *.py[cod]
+docs/plans/*
+!docs/plans/worldquant101_manifest.md

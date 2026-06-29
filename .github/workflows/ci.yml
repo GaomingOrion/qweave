@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Rust
+        run: |
+          rustup show
+          rustup component add rustfmt clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Python lock check
+        run: uv lock --check
+
+      - name: Install Python dependencies
+        run: uv sync --dev --locked
+
+      - name: Rust format
+        run: cargo fmt --check
+
+      - name: Rust check
+        run: cargo check --workspace
+
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Build Python extension
+        run: uv run maturin develop
+
+      - name: Python tests
+        run: uv run pytest

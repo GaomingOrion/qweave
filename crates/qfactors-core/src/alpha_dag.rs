@@ -122,6 +122,7 @@ struct Dag {
 }
 
 impl Dag {
+    #[cfg(test)]
     fn node_count(&self) -> usize {
         self.nodes.len()
     }
@@ -344,11 +345,7 @@ impl Dag {
         self.layouts[id.index()]
     }
 
-    fn eval_roots(
-        &self,
-        roots: &[NodeId],
-        cs: &CellSet,
-    ) -> Result<(Vec<Arc<DagVal>>, DagEvalStats)> {
+    fn eval_roots(&self, roots: &[NodeId], cs: &CellSet) -> Result<Vec<Arc<DagVal>>> {
         let order = self.reachable_order(roots);
         let mut remaining_consumers = self.consumer_counts(&order, roots);
         let mut slots = vec![None; self.nodes.len()];
@@ -379,12 +376,7 @@ impl Dag {
             })
             .collect();
 
-        Ok((
-            values,
-            DagEvalStats {
-                eval_nodes: order.len(),
-            },
-        ))
+        Ok(values)
     }
 
     fn reachable_order(&self, roots: &[NodeId]) -> Vec<NodeId> {
@@ -646,11 +638,6 @@ enum DagVal {
     Scalar(f64),
 }
 
-#[derive(Debug, Clone, Copy)]
-struct DagEvalStats {
-    eval_nodes: usize,
-}
-
 pub(crate) fn eval_alphas(
     resolved: &[(String, Expr)],
     cs: &CellSet,
@@ -660,12 +647,7 @@ pub(crate) fn eval_alphas(
         .iter()
         .map(|(_, expr)| dag.lower(expr))
         .collect::<Vec<_>>();
-    let (values, stats) = dag.eval_roots(&roots, cs)?;
-    eprintln!(
-        "qfactors alpha DAG: total_nodes={} eval_nodes={}",
-        dag.node_count(),
-        stats.eval_nodes
-    );
+    let values = dag.eval_roots(&roots, cs)?;
 
     Ok(resolved
         .iter()
@@ -881,7 +863,7 @@ mod tests {
     fn eval_dag(expr: &Expr, cs: &CellSet) -> Result<Vec<f64>> {
         let mut dag = Dag::default();
         let root = dag.lower(expr);
-        let (values, _) = dag.eval_roots(&[root], cs)?;
+        let values = dag.eval_roots(&[root], cs)?;
         Ok(to_cells(&values[0], Layout::Tn, cs))
     }
 

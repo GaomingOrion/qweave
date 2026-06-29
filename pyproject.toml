@@ -6,8 +6,26 @@ build-backend = "maturin"
 name = "qfactors"
 version = "0.2.0.dev0"
 description = "Rust kernel factor framework for Polars panels"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "zer0quant contributors" }]
 requires-python = ">=3.10"
 dependencies = ["polars>=1.0"]
+keywords = ["quant", "factors", "polars", "finance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/zer0quant/rfactor"
+Repository = "https://github.com/zer0quant/rfactor"
+Issues = "https://github.com/zer0quant/rfactor/issues"
 
 [dependency-groups]
 dev = [
@@ -22,7 +40,3 @@ features = ["extension-module"]
 
 [tool.uv]
 package = false
-
-[[tool.uv.index]]
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-default = true

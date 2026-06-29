@@ -21,11 +21,19 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// Return the input Polars DataFrame unchanged.
 #[pyfunction]
 fn roundtrip(df: PyDataFrame) -> PyDataFrame {
     df
 }
 
+/// Compute registered factor kernels on a Polars panel.
+///
+/// The input DataFrame must contain the symbol and time columns plus every field
+/// required by the requested factors. Results are sampled at `observation_times`.
+/// Float input nulls become NaN; structural columns and observation times must
+/// not contain nulls. If `output_path` is set, the result is written as Parquet
+/// and a summary dict is returned. Otherwise a Polars DataFrame is returned.
 #[pyfunction(name = "compute_panel", signature = (
     df,
     symbol_col,
@@ -61,12 +69,20 @@ fn compute_panel_py(
     }
 }
 
+/// Return metadata for all registered factor kernels.
 #[pyfunction(name = "factor_catalog")]
 fn factor_catalog_py() -> PyResult<PyDataFrame> {
     qfactors_factors::ensure_linked();
     factor_catalog().map(PyDataFrame).map_err(to_py_err)
 }
 
+/// Compute registered alpha expressions on a Polars panel.
+///
+/// The input DataFrame must contain the symbol and time columns plus every field
+/// required by the requested alphas. Results are sampled at `observation_times`.
+/// Float input nulls become NaN; structural columns and observation times must
+/// not contain nulls. If `output_path` is set, the result is written as Parquet
+/// and a summary dict is returned. Otherwise a Polars DataFrame is returned.
 #[pyfunction(name = "compute_alphas", signature = (
     df,
     symbol_col,
@@ -102,6 +118,7 @@ fn compute_alphas_py(
     }
 }
 
+/// Return metadata for all registered alpha expressions.
 #[pyfunction(name = "alpha_catalog")]
 fn alpha_catalog_py() -> PyResult<PyDataFrame> {
     qfactors_factors::ensure_linked();
