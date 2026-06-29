@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::cellset::CellSet;
 use crate::error::{QFactorsError, Result};
@@ -287,15 +287,24 @@ fn ts_window(
     }
 
     for block in &cs.sym_blocks {
-        if block.len() < days {
-            continue;
-        }
-        for local_idx in days - 1..block.len() {
-            let start = block.start + local_idx + 1 - days;
-            let end = block.start + local_idx;
-            let window = &values[start..=end];
-            if window.iter().all(|value| !value.is_nan()) {
-                out[end] = reduce(window);
+        let mut nan_count = 0usize;
+        for local_idx in 0..block.len() {
+            let idx = block.start + local_idx;
+            if values[idx].is_nan() {
+                nan_count += 1;
+            }
+
+            if local_idx >= days {
+                let old_idx = block.start + local_idx - days;
+                if values[old_idx].is_nan() {
+                    nan_count -= 1;
+                }
+            }
+
+            if local_idx + 1 >= days && nan_count == 0 {
+                let start = block.start + local_idx + 1 - days;
+                let window = &values[start..=idx];
+                out[idx] = reduce(window);
             }
         }
     }
@@ -315,21 +324,199 @@ fn ts_window2(
     }
 
     for block in &cs.sym_blocks {
-        if block.len() < days {
-            continue;
-        }
-        for local_idx in days - 1..block.len() {
-            let start = block.start + local_idx + 1 - days;
-            let end = block.start + local_idx;
-            let lhs_window = &lhs[start..=end];
-            let rhs_window = &rhs[start..=end];
-            if lhs_window.iter().all(|value| !value.is_nan())
-                && rhs_window.iter().all(|value| !value.is_nan())
-            {
-                out[end] = reduce(lhs_window, rhs_window);
+        let mut nan_count = 0usize;
+        for local_idx in 0..block.len() {
+            let idx = block.start + local_idx;
+            if lhs[idx].is_nan() {
+                nan_count += 1;
+            }
+            if rhs[idx].is_nan() {
+                nan_count += 1;
+            }
+
+            if local_idx >= days {
+                let old_idx = block.start + local_idx - days;
+                if lhs[old_idx].is_nan() {
+                    nan_count -= 1;
+                }
+                if rhs[old_idx].is_nan() {
+                    nan_count -= 1;
+                }
+            }
+
+            if local_idx + 1 >= days && nan_count == 0 {
+                let start = block.start + local_idx + 1 - days;
+                let lhs_window = &lhs[start..=idx];
+                let rhs_window = &rhs[start..=idx];
+                out[idx] = reduce(lhs_window, rhs_window);
             }
         }
     }
+    out
+}
+
+trait RollingValue {
+    fn push(&mut self, x: f64, days: usize);
+    fn pop(&mut self, x: f64);
+    fn value(&self, days: usize) -> f64;
+}
+
+fn ts_rolling_value<R: RollingValue + Default>(
+    values: &[f64],
+    days: usize,
+    cs: &CellSet,
+    fallback: impl Fn(&[f64]) -> f64,
+) -> Vec<f64> {
+    let mut out = vec![f64::NAN; values.len()];
+    if days == 0 {
+        return out;
+    }
+
+    for block in &cs.sym_blocks {
+        let mut reducer = R::default();
+        let mut nan_count = 0usize;
+        let mut inf_count = 0usize;
+        for local_idx in 0..block.len() {
+            let idx = block.start + local_idx;
+            let value = values[idx];
+            if value.is_nan() {
+                nan_count += 1;
+                reducer.push(0.0, days);
+            } else if value.is_infinite() {
+                inf_count += 1;
+                reducer.push(0.0, days);
+            } else {
+                reducer.push(value, days);
+            }
+
+            if local_idx >= days {
+                let old_idx = block.start + local_idx - days;
+                let old_value = values[old_idx];
+                if old_value.is_nan() {
+                    nan_count -= 1;
+                    reducer.pop(0.0);
+                } else if old_value.is_infinite() {
+                    inf_count -= 1;
+                    reducer.pop(0.0);
+                } else {
+                    reducer.pop(old_value);
+                }
+            }
+
+            if local_idx + 1 >= days && nan_count == 0 {
+                if inf_count == 0 {
+                    out[idx] = reducer.value(days);
+                } else {
+                    let start = block.start + local_idx + 1 - days;
+                    out[idx] = fallback(&values[start..=idx]);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+#[derive(Default)]
+struct RollingMean {
+    sum: f64,
+}
+
+impl RollingValue for RollingMean {
+    fn push(&mut self, x: f64, _days: usize) {
+        self.sum += x;
+    }
+
+    fn pop(&mut self, x: f64) {
+        self.sum -= x;
+    }
+
+    fn value(&self, days: usize) -> f64 {
+        self.sum / days as f64
+    }
+}
+
+#[derive(Default)]
+struct RollingMoments {
+    sum: f64,
+    sum_squares: f64,
+}
+
+impl RollingValue for RollingMoments {
+    fn push(&mut self, x: f64, _days: usize) {
+        self.sum += x;
+        self.sum_squares += x * x;
+    }
+
+    fn pop(&mut self, x: f64) {
+        self.sum -= x;
+        self.sum_squares -= x * x;
+    }
+
+    fn value(&self, days: usize) -> f64 {
+        if days < 2 {
+            return f64::NAN;
+        }
+        let days = days as f64;
+        let variance = (self.sum_squares - self.sum * self.sum / days) / (days - 1.0);
+        variance.max(0.0).sqrt()
+    }
+}
+
+fn ts_deque_window(
+    values: &[f64],
+    days: usize,
+    cs: &CellSet,
+    should_pop_back: impl Fn(f64, f64) -> bool,
+) -> Vec<f64> {
+    let mut out = vec![f64::NAN; values.len()];
+    if days == 0 {
+        return out;
+    }
+
+    for block in &cs.sym_blocks {
+        let mut deque = VecDeque::new();
+        let mut nan_count = 0usize;
+        for local_idx in 0..block.len() {
+            let idx = block.start + local_idx;
+            let value = values[idx];
+            if value.is_nan() {
+                nan_count += 1;
+            } else {
+                while let Some(&back_idx) = deque.back() {
+                    if should_pop_back(values[back_idx], value) {
+                        deque.pop_back();
+                    } else {
+                        break;
+                    }
+                }
+                deque.push_back(idx);
+            }
+
+            if local_idx >= days {
+                let old_idx = block.start + local_idx - days;
+                if values[old_idx].is_nan() {
+                    nan_count -= 1;
+                }
+            }
+
+            if local_idx + 1 >= days {
+                let window_start = block.start + local_idx + 1 - days;
+                while deque
+                    .front()
+                    .is_some_and(|front_idx| *front_idx < window_start)
+                {
+                    deque.pop_front();
+                }
+
+                if nan_count == 0 {
+                    let best_idx = *deque.front().expect("full non-NaN window has a value");
+                    out[idx] = values[best_idx];
+                }
+            }
+        }
+    }
+
     out
 }
 
@@ -411,7 +598,7 @@ fn ts_sum(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 fn ts_mean(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_window(values, days, cs, |window| {
+    ts_rolling_value::<RollingMean>(values, days, cs, |window| {
         window.iter().sum::<f64>() / window.len() as f64
     })
 }
@@ -421,21 +608,11 @@ fn product(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 fn ts_min(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_window(values, days, cs, |window| {
-        window
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, |acc, value| acc.min(value))
-    })
+    ts_deque_window(values, days, cs, |back, current| back >= current)
 }
 
 fn ts_max(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_window(values, days, cs, |window| {
-        window
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, |acc, value| acc.max(value))
-    })
+    ts_deque_window(values, days, cs, |back, current| back <= current)
 }
 
 fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
@@ -473,7 +650,7 @@ fn ts_rank(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 fn ts_std(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_window(values, days, cs, |window| {
+    ts_rolling_value::<RollingMoments>(values, days, cs, |window| {
         if window.len() < 2 {
             return f64::NAN;
         }
