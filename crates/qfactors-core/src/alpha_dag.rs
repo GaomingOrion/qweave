@@ -685,8 +685,10 @@ pub(crate) fn eval_alphas(
         .collect::<Vec<_>>();
     let values = dag.eval_roots(&roots, cs)?;
 
+    // Materializing each root (transpose to Tn + clone) is independent per
+    // alpha, so fan it out across alphas instead of a serial map.
     Ok(resolved
-        .iter()
+        .par_iter()
         .zip(values)
         .map(|((name, _), value)| (name.clone(), to_cells(&value, Layout::Tn, cs)))
         .collect())

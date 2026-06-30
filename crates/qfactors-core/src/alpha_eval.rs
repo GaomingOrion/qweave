@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
+use std::ops::Range;
+
+use rayon::prelude::*;
 
 use crate::cellset::CellSet;
 use crate::error::{QFactorsError, Result};
@@ -265,12 +268,41 @@ fn eval_where(cond: &Expr, when_true: &Expr, when_false: &Expr, cs: &CellSet) ->
 }
 
 pub(crate) fn delay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
-    for block in &cs.sym_blocks {
-        for local_idx in days..block.len() {
-            out[block.start + local_idx] = values[block.start + local_idx - days];
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate().skip(days) {
+            *out_cell = values[block.start + local_idx - days];
         }
+    })
+}
+
+/// Fill an `n_cells`-long output one block at a time, in parallel. `blocks` must
+/// partition `0..n_cells` contiguously and in order (which both `sym_blocks` and
+/// `time_blocks` do), so each block owns a disjoint output sub-slice and the
+/// blocks can run concurrently without locking. `fill(block, out_block)` reads
+/// `values` by global index but writes its block-local slice (`out_block[i]` is
+/// global index `block.start + i`).
+///
+/// Nested inside the alpha-DAG's per-level `par_iter`, rayon's work-stealing
+/// only spreads a single kernel across cores when the surrounding level is too
+/// narrow (or too skewed) to keep them busy — so a lone heavy node (a wide
+/// correlation/rolling window) no longer serializes its level.
+fn par_fill_blocks(
+    n_cells: usize,
+    blocks: &[Range<usize>],
+    fill: impl Fn(&Range<usize>, &mut [f64]) + Sync,
+) -> Vec<f64> {
+    let mut out = vec![f64::NAN; n_cells];
+    let mut out_blocks: Vec<&mut [f64]> = Vec::with_capacity(blocks.len());
+    let mut rest = out.as_mut_slice();
+    for block in blocks {
+        let (head, tail) = rest.split_at_mut(block.len());
+        out_blocks.push(head);
+        rest = tail;
     }
+    blocks
+        .par_iter()
+        .zip(out_blocks)
+        .for_each(|(block, out_block)| fill(block, out_block));
     out
 }
 
@@ -278,16 +310,15 @@ fn ts_window(
     values: &[f64],
     days: usize,
     cs: &CellSet,
-    reduce: impl Fn(&[f64]) -> f64,
+    reduce: impl Fn(&[f64]) -> f64 + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
     if days == 0 {
-        return out;
+        return vec![f64::NAN; values.len()];
     }
 
-    for block in &cs.sym_blocks {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
         let mut nan_count = 0usize;
-        for local_idx in 0..block.len() {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
             let idx = block.start + local_idx;
             if values[idx].is_nan() {
                 nan_count += 1;
@@ -303,11 +334,10 @@ fn ts_window(
             if local_idx + 1 >= days && nan_count == 0 {
                 let start = block.start + local_idx + 1 - days;
                 let window = &values[start..=idx];
-                out[idx] = reduce(window);
+                *out_cell = reduce(window);
             }
         }
-    }
-    out
+    })
 }
 
 fn ts_window2(
@@ -315,16 +345,15 @@ fn ts_window2(
     rhs: &[f64],
     days: usize,
     cs: &CellSet,
-    reduce: impl Fn(&[f64], &[f64]) -> f64,
+    reduce: impl Fn(&[f64], &[f64]) -> f64 + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; lhs.len()];
     if days == 0 {
-        return out;
+        return vec![f64::NAN; lhs.len()];
     }
 
-    for block in &cs.sym_blocks {
+    par_fill_blocks(lhs.len(), &cs.sym_blocks, |block, out_block| {
         let mut nan_count = 0usize;
-        for local_idx in 0..block.len() {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
             let idx = block.start + local_idx;
             if lhs[idx].is_nan() {
                 nan_count += 1;
@@ -347,11 +376,10 @@ fn ts_window2(
                 let start = block.start + local_idx + 1 - days;
                 let lhs_window = &lhs[start..=idx];
                 let rhs_window = &rhs[start..=idx];
-                out[idx] = reduce(lhs_window, rhs_window);
+                *out_cell = reduce(lhs_window, rhs_window);
             }
         }
-    }
-    out
+    })
 }
 
 trait RollingValue {
@@ -364,18 +392,17 @@ fn ts_rolling_value<R: RollingValue + Default>(
     values: &[f64],
     days: usize,
     cs: &CellSet,
-    fallback: impl Fn(&[f64]) -> f64,
+    fallback: impl Fn(&[f64]) -> f64 + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
     if days == 0 {
-        return out;
+        return vec![f64::NAN; values.len()];
     }
 
-    for block in &cs.sym_blocks {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
         let mut reducer = R::default();
         let mut nan_count = 0usize;
         let mut inf_count = 0usize;
-        for local_idx in 0..block.len() {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
             let idx = block.start + local_idx;
             let value = values[idx];
             if value.is_nan() {
@@ -400,16 +427,14 @@ fn ts_rolling_value<R: RollingValue + Default>(
 
             if local_idx + 1 >= days && nan_count == 0 {
                 if inf_count == 0 {
-                    out[idx] = reducer.value(days);
+                    *out_cell = reducer.value(days);
                 } else {
                     let start = block.start + local_idx + 1 - days;
-                    out[idx] = fallback(&values[start..=idx]);
+                    *out_cell = fallback(&values[start..=idx]);
                 }
             }
         }
-    }
-
-    out
+    })
 }
 
 #[derive(Default)]
@@ -518,16 +543,15 @@ impl RollingDecay {
 }
 
 fn ts_rolling_decay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
     if days == 0 {
-        return out;
+        return vec![f64::NAN; values.len()];
     }
 
-    for block in &cs.sym_blocks {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
         let mut reducer = RollingDecay::default();
         let mut nan_count = 0usize;
         let mut inf_count = 0usize;
-        for local_idx in 0..block.len() {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
             let idx = block.start + local_idx;
             let value = values[idx];
             if value.is_nan() {
@@ -556,33 +580,30 @@ fn ts_rolling_decay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 
             if local_idx + 1 >= days && nan_count == 0 {
                 if inf_count == 0 {
-                    out[idx] = reducer.value(days);
+                    *out_cell = reducer.value(days);
                 } else {
                     let start = block.start + local_idx + 1 - days;
-                    out[idx] = decay_linear_window(&values[start..=idx]);
+                    *out_cell = decay_linear_window(&values[start..=idx]);
                 }
             }
         }
-    }
-
-    out
+    })
 }
 
 fn ts_deque_window(
     values: &[f64],
     days: usize,
     cs: &CellSet,
-    should_pop_back: impl Fn(f64, f64) -> bool,
+    should_pop_back: impl Fn(f64, f64) -> bool + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
     if days == 0 {
-        return out;
+        return vec![f64::NAN; values.len()];
     }
 
-    for block in &cs.sym_blocks {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
         let mut deque = VecDeque::new();
         let mut nan_count = 0usize;
-        for local_idx in 0..block.len() {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
             let idx = block.start + local_idx;
             let value = values[idx];
             if value.is_nan() {
@@ -616,23 +637,19 @@ fn ts_deque_window(
 
                 if nan_count == 0 {
                     let best_idx = *deque.front().expect("full non-NaN window has a value");
-                    out[idx] = values[best_idx];
+                    *out_cell = values[best_idx];
                 }
             }
         }
-    }
-
-    out
+    })
 }
 
 fn xs_per_block(
     values: &[f64],
     cs: &CellSet,
-    f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)>,
+    f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
-
-    for block in &cs.time_blocks {
+    par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
         let present = block
             .clone()
             .filter_map(|idx| {
@@ -642,22 +659,18 @@ fn xs_per_block(
             .collect::<Vec<_>>();
 
         for (idx, value) in f(&present) {
-            out[idx] = value;
+            out_block[idx - block.start] = value;
         }
-    }
-
-    out
+    })
 }
 
 fn xs_per_group(
     values: &[f64],
     groups: &[f64],
     cs: &CellSet,
-    f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)>,
+    f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
-
-    for block in &cs.time_blocks {
+    par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
         let mut buckets: HashMap<u64, Vec<(usize, f64)>> = HashMap::new();
         for idx in block.clone() {
             let value = values[idx];
@@ -673,29 +686,23 @@ fn xs_per_group(
 
         for bucket in buckets.values() {
             for (idx, value) in f(bucket) {
-                out[idx] = value;
+                out_block[idx - block.start] = value;
             }
         }
-    }
-
-    out
+    })
 }
 
 pub(crate) fn delta(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    let mut out = vec![f64::NAN; values.len()];
-
-    for block in &cs.sym_blocks {
-        for local_idx in days..block.len() {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate().skip(days) {
             let idx = block.start + local_idx;
             let current = values[idx];
             let previous = values[idx - days];
             if !current.is_nan() && !previous.is_nan() {
-                out[idx] = current - previous;
+                *out_cell = current - previous;
             }
         }
-    }
-
-    out
+    })
 }
 
 pub(crate) fn ts_sum(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
