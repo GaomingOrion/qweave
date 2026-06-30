@@ -44,6 +44,14 @@ pub fn compute_alphas(
     };
     let observations = resolve_alpha_observations(&df, &options.time_col, &cs, observation_times)?;
 
+    // Full-panel output (every time block, in order) is the common case. Build it
+    // by moving each alpha's Tn vector straight into a column (zero copy) and
+    // cloning the shared index columns, instead of slicing every observation into
+    // its own frame and vstacking them.
+    if output_path.is_none() && is_full_output(&observations, &cs) {
+        return Ok(ComputeResult::Memory(build_full_frame(&cs, results, &options)?));
+    }
+
     let mut sink = ComputeSink::for_output(output_path);
     for (input_index, time_block) in observations.time_blocks.iter().enumerate() {
         let frame = build_observation_frame(
@@ -147,6 +155,40 @@ fn resolve_alpha_observations(
         values,
         time_blocks,
     })
+}
+
+/// True when the observations cover every time block exactly once, in order, so
+/// the output is the whole Tn panel and can be emitted without slicing.
+fn is_full_output(observations: &ResolvedAlphaObservations, cs: &CellSet) -> bool {
+    observations.time_blocks.len() == cs.time_blocks.len()
+        && observations
+            .time_blocks
+            .iter()
+            .enumerate()
+            .all(|(index, block)| *block == Some(index))
+}
+
+/// Assemble the full-panel output by moving each alpha's Tn vector into a column
+/// (no copy) and cloning the shared, cheap (Arc-backed) index columns.
+fn build_full_frame(
+    cs: &CellSet,
+    results: Vec<(String, Vec<f64>)>,
+    options: &ComputePanelOptions,
+) -> Result<DataFrame> {
+    let mut columns = Vec::with_capacity(results.len() + 2);
+
+    let mut time = cs.times_tn.clone();
+    time.rename(options.time_col.clone().into());
+    let mut symbol = cs.symbols_tn.clone();
+    symbol.rename(options.symbol_col.clone().into());
+    columns.push(time);
+    columns.push(symbol);
+
+    for (name, values) in results {
+        columns.push(Float64Chunked::from_vec(name.into(), values).into_series().into_column());
+    }
+
+    Ok(DataFrame::new_infer_height(columns)?)
 }
 
 fn build_observation_frame(

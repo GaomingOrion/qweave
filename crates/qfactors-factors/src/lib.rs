@@ -459,7 +459,7 @@ mod tests {
                 df.clone(),
                 options(),
                 alpha_names.clone(),
-                Series::new("time".into(), [n_times as i64]),
+                Series::new("time".into(), (1..=n_times as i64).collect::<Vec<_>>()),
                 None,
             )?)?;
             total_rows += out.height();
