@@ -14,6 +14,14 @@ use crate::error::{QFactorsError, Result};
 use crate::expr::{CmpOp, Expr};
 use crate::layout::{Layout, nt_to_tn, tn_to_nt};
 
+/// Upper bound on nodes evaluated concurrently within one dependency level.
+/// Bounds peak memory (one full-panel output per in-flight node) while staying a
+/// small multiple of the core count, so every core stays busy and heavy nodes
+/// still parallelize their own kernel via work-stealing.
+fn max_nodes_in_flight() -> usize {
+    2 * std::thread::available_parallelism().map_or(8, |n| n.get())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct NodeId(u32);
 
@@ -352,32 +360,39 @@ impl Dag {
         let levels = self.level_buckets(&order);
         let mut remaining_consumers = self.consumer_counts(&order, roots);
         let mut slots: Vec<Option<Arc<DagVal>>> = vec![None; self.nodes.len()];
+        let max_in_flight = max_nodes_in_flight();
 
         for level in &levels {
             // Every child of a node sits in a strictly lower level, so nodes in
-            // one level are mutually independent: evaluate them in parallel while
-            // reading the already-filled slots immutably, then install the
-            // results sequentially. The parallel phase never mutates, so the
-            // borrows can't overlap and there is no data race.
-            let computed = level
-                .par_iter()
-                .map(|&id| self.eval_node(id, &slots, cs).map(|value| (id, Arc::new(value))))
-                .collect::<Result<Vec<_>>>()?;
-            for (id, value) in computed {
-                slots[id.index()] = Some(value);
-            }
-            // Release any child whose last consumer has now run, capping peak
-            // memory the same way the sequential evaluator did.
-            for &id in level {
-                self.nodes[id.index()].visit_children(|child| {
-                    let remaining = &mut remaining_consumers[child.index()];
-                    *remaining = remaining
-                        .checked_sub(1)
-                        .expect("child consumer count underflow");
-                    if *remaining == 0 {
-                        slots[child.index()] = None;
-                    }
-                });
+            // one level are mutually independent. We still cap how many run at
+            // once: a wide level holds one full-panel output per node, so without
+            // a bound the peak is the widest level. Evaluate the level in chunks
+            // that keep every core busy (heavy nodes still parallelize their own
+            // kernel) while only `MAX_NODES_IN_FLIGHT` outputs are live at a time.
+            for chunk in level.chunks(max_in_flight) {
+                // The parallel phase only reads the already-filled slots, so the
+                // borrows can't overlap and there is no data race; results are
+                // installed sequentially afterwards.
+                let computed = chunk
+                    .par_iter()
+                    .map(|&id| self.eval_node(id, &slots, cs).map(|value| (id, Arc::new(value))))
+                    .collect::<Result<Vec<_>>>()?;
+                for (id, value) in computed {
+                    slots[id.index()] = Some(value);
+                }
+                // Release any child whose last consumer has now run, capping peak
+                // memory the same way the sequential evaluator did.
+                for &id in chunk {
+                    self.nodes[id.index()].visit_children(|child| {
+                        let remaining = &mut remaining_consumers[child.index()];
+                        *remaining = remaining
+                            .checked_sub(1)
+                            .expect("child consumer count underflow");
+                        if *remaining == 0 {
+                            slots[child.index()] = None;
+                        }
+                    });
+                }
             }
         }
 
