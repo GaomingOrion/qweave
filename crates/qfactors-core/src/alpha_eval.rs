@@ -140,14 +140,14 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
         Expr::Rank(inner) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: rank(&values, Layout::Tn, cs),
+                values: rank(&values, Layout::Tn, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
         Expr::Scale(inner, scale_to) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: scale(&values, Layout::Tn, *scale_to, cs),
+                values: scale(&values, Layout::Tn, Layout::Tn, *scale_to, cs),
                 layout: Layout::Tn,
             })
         }
@@ -155,7 +155,7 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: group_rank(&values, Layout::Tn, &groups, Layout::Tn, cs),
+                values: group_rank(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
@@ -163,7 +163,7 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, cs),
+                values: group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
@@ -656,24 +656,60 @@ fn read_cell(values: &[f64], layout: Layout, tn_idx: usize, cs: &CellSet) -> f64
     }
 }
 
+/// Place each block's `(tn_idx, value)` results into an output buffer in the
+/// requested layout. A Tn output is contiguous per block (safe disjoint slices);
+/// an Nt output is scattered through `tn_order`, letting a cross-sectional op
+/// emit its result straight into Nt without a follow-up transpose.
+fn scatter_pairs(
+    n_cells: usize,
+    output: Layout,
+    cs: &CellSet,
+    per_block: impl Fn(&Range<usize>) -> Vec<(usize, f64)> + Sync,
+) -> Vec<f64> {
+    match output {
+        Layout::Tn => par_fill_blocks(n_cells, &cs.time_blocks, |block, out_block| {
+            for (tn_idx, value) in per_block(block) {
+                out_block[tn_idx - block.start] = value;
+            }
+        }),
+        Layout::Nt => {
+            let mut out = vec![f64::NAN; n_cells];
+            // Threads write disjoint cells (`time_blocks` partition the Tn axis,
+            // `tn_order` is a permutation), so the buffer can be scattered into
+            // concurrently. The base address is shared as a `usize` because a raw
+            // pointer is not `Sync`; `out` is not resized while the scatter runs.
+            let base = out.as_mut_ptr() as usize;
+            cs.time_blocks.par_iter().for_each(|block| {
+                for (tn_idx, value) in per_block(block) {
+                    let nt_idx = cs.tn_order[tn_idx];
+                    debug_assert!(nt_idx < n_cells);
+                    // SAFETY: `nt_idx < n_cells` and is written by exactly one
+                    // thread (disjoint blocks, permutation indices), so this is a
+                    // race-free write into the live `out` allocation.
+                    unsafe { *(base as *mut f64).add(nt_idx) = value };
+                }
+            });
+            out
+        }
+    }
+}
+
 fn xs_per_block(
     values: &[f64],
-    layout: Layout,
+    input_layout: Layout,
+    output: Layout,
     cs: &CellSet,
     f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
-    par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
+    scatter_pairs(values.len(), output, cs, |block| {
         let present = block
             .clone()
             .filter_map(|tn_idx| {
-                let value = read_cell(values, layout, tn_idx, cs);
+                let value = read_cell(values, input_layout, tn_idx, cs);
                 (!value.is_nan()).then_some((tn_idx, value))
             })
             .collect::<Vec<_>>();
-
-        for (tn_idx, value) in f(&present) {
-            out_block[tn_idx - block.start] = value;
-        }
+        f(&present)
     })
 }
 
@@ -682,10 +718,11 @@ fn xs_per_group(
     values_layout: Layout,
     groups: &[f64],
     groups_layout: Layout,
+    output: Layout,
     cs: &CellSet,
     f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
-    par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
+    scatter_pairs(values.len(), output, cs, |block| {
         let mut buckets: HashMap<u64, Vec<(usize, f64)>> = HashMap::new();
         for tn_idx in block.clone() {
             let value = read_cell(values, values_layout, tn_idx, cs);
@@ -699,11 +736,7 @@ fn xs_per_group(
                 .push((tn_idx, value));
         }
 
-        for bucket in buckets.values() {
-            for (idx, value) in f(bucket) {
-                out_block[idx - block.start] = value;
-            }
-        }
+        buckets.values().flat_map(|bucket| f(bucket)).collect()
     })
 }
 
@@ -815,12 +848,18 @@ pub(crate) fn covariance(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) ->
     ts_window2(lhs, rhs, days, cs, covariance_window)
 }
 
-pub(crate) fn rank(values: &[f64], layout: Layout, cs: &CellSet) -> Vec<f64> {
-    xs_per_block(values, layout, cs, rank_pairs)
+pub(crate) fn rank(values: &[f64], input_layout: Layout, output: Layout, cs: &CellSet) -> Vec<f64> {
+    xs_per_block(values, input_layout, output, cs, rank_pairs)
 }
 
-pub(crate) fn scale(values: &[f64], layout: Layout, scale_to: f64, cs: &CellSet) -> Vec<f64> {
-    xs_per_block(values, layout, cs, |present| {
+pub(crate) fn scale(
+    values: &[f64],
+    input_layout: Layout,
+    output: Layout,
+    scale_to: f64,
+    cs: &CellSet,
+) -> Vec<f64> {
+    xs_per_block(values, input_layout, output, cs, |present| {
         let denom = present.iter().map(|(_, value)| value.abs()).sum::<f64>();
         if denom == 0.0 {
             return Vec::new();
@@ -837,9 +876,10 @@ pub(crate) fn group_rank(
     values_layout: Layout,
     groups: &[f64],
     groups_layout: Layout,
+    output: Layout,
     cs: &CellSet,
 ) -> Vec<f64> {
-    xs_per_group(values, values_layout, groups, groups_layout, cs, rank_pairs)
+    xs_per_group(values, values_layout, groups, groups_layout, output, cs, rank_pairs)
 }
 
 pub(crate) fn group_neutralize(
@@ -847,9 +887,10 @@ pub(crate) fn group_neutralize(
     values_layout: Layout,
     groups: &[f64],
     groups_layout: Layout,
+    output: Layout,
     cs: &CellSet,
 ) -> Vec<f64> {
-    xs_per_group(values, values_layout, groups, groups_layout, cs, |present| {
+    xs_per_group(values, values_layout, groups, groups_layout, output, cs, |present| {
         let mean = present.iter().map(|(_, value)| value).sum::<f64>() / present.len() as f64;
         present
             .iter()

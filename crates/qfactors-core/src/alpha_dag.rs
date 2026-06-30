@@ -116,6 +116,52 @@ impl Node {
             }
         }
     }
+
+    /// Rebuild this node with every child id passed through `map` (used to
+    /// rewrite references when a transpose is bypassed).
+    fn map_children(&self, mut map: impl FnMut(NodeId) -> NodeId) -> Node {
+        match self {
+            Node::Field(name) => Node::Field(name.clone()),
+            Node::Const(bits) => Node::Const(*bits),
+            Node::Transpose(inner) => Node::Transpose(map(*inner)),
+            Node::Add(lhs, rhs) => Node::Add(map(*lhs), map(*rhs)),
+            Node::Sub(lhs, rhs) => Node::Sub(map(*lhs), map(*rhs)),
+            Node::Mul(lhs, rhs) => Node::Mul(map(*lhs), map(*rhs)),
+            Node::Div(lhs, rhs) => Node::Div(map(*lhs), map(*rhs)),
+            Node::Neg(inner) => Node::Neg(map(*inner)),
+            Node::Delay(inner, days) => Node::Delay(map(*inner), *days),
+            Node::Delta(inner, days) => Node::Delta(map(*inner), *days),
+            Node::TsSum(inner, days) => Node::TsSum(map(*inner), *days),
+            Node::TsMean(inner, days) => Node::TsMean(map(*inner), *days),
+            Node::Product(inner, days) => Node::Product(map(*inner), *days),
+            Node::TsMin(inner, days) => Node::TsMin(map(*inner), *days),
+            Node::TsMax(inner, days) => Node::TsMax(map(*inner), *days),
+            Node::TsArgMin(inner, days) => Node::TsArgMin(map(*inner), *days),
+            Node::TsArgMax(inner, days) => Node::TsArgMax(map(*inner), *days),
+            Node::TsRank(inner, days) => Node::TsRank(map(*inner), *days),
+            Node::TsStd(inner, days) => Node::TsStd(map(*inner), *days),
+            Node::DecayLinear(inner, days) => Node::DecayLinear(map(*inner), *days),
+            Node::Correlation(lhs, rhs, days) => Node::Correlation(map(*lhs), map(*rhs), *days),
+            Node::Covariance(lhs, rhs, days) => Node::Covariance(map(*lhs), map(*rhs), *days),
+            Node::Rank(inner) => Node::Rank(map(*inner)),
+            Node::Scale(inner, scale_to) => Node::Scale(map(*inner), *scale_to),
+            Node::GroupRank(values, groups) => Node::GroupRank(map(*values), map(*groups)),
+            Node::GroupNeutralize(values, groups) => {
+                Node::GroupNeutralize(map(*values), map(*groups))
+            }
+            Node::Abs(inner) => Node::Abs(map(*inner)),
+            Node::Log(inner) => Node::Log(map(*inner)),
+            Node::Sign(inner) => Node::Sign(map(*inner)),
+            Node::SignedPower(lhs, rhs) => Node::SignedPower(map(*lhs), map(*rhs)),
+            Node::Power(lhs, rhs) => Node::Power(map(*lhs), map(*rhs)),
+            Node::Min(lhs, rhs) => Node::Min(map(*lhs), map(*rhs)),
+            Node::Max(lhs, rhs) => Node::Max(map(*lhs), map(*rhs)),
+            Node::Cmp(op, lhs, rhs) => Node::Cmp(*op, map(*lhs), map(*rhs)),
+            Node::Where(cond, when_true, when_false) => {
+                Node::Where(map(*cond), map(*when_true), map(*when_false))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,6 +401,14 @@ impl Dag {
         self.layouts[id.index()]
     }
 
+    /// Output layout of a cross-sectional node (always cells, never scalar).
+    fn cells_layout(&self, id: NodeId) -> Layout {
+        match self.layout(id) {
+            ValueLayout::Cells(layout) => layout,
+            ValueLayout::Scalar => Layout::Tn,
+        }
+    }
+
     fn eval_roots(&self, roots: &[NodeId], cs: &CellSet) -> Result<Vec<Arc<DagVal>>> {
         let order = self.reachable_order(roots);
         let levels = self.level_buckets(&order);
@@ -494,6 +548,45 @@ impl Dag {
             }
         }
         input
+    }
+
+    /// Mirror of the input fusion on the output side: when a cross-sectional op's
+    /// only consumer is a transpose to Nt (e.g. it feeds a time-series op), flip
+    /// the op to emit Nt directly (it scatters its result into Nt) and drop the
+    /// transpose. A shared output (the op also consumed as Tn) keeps materializing
+    /// once. Value-preserving — same cells, different storage order.
+    fn fuse_xs_output_transposes(&mut self, roots: &[NodeId]) {
+        let order = self.reachable_order(roots);
+        let counts = self.consumer_counts(&order, roots);
+        let mut remap: HashMap<NodeId, NodeId> = HashMap::new();
+        for &id in &order {
+            let child = match &self.nodes[id.index()] {
+                Node::Transpose(child) => *child,
+                _ => continue,
+            };
+            if counts[child.index()] == 1
+                && self.layout(id) == ValueLayout::Cells(Layout::Nt)
+                && self.is_xs_op(child)
+            {
+                self.layouts[child.index()] = ValueLayout::Cells(Layout::Nt);
+                remap.insert(id, child);
+            }
+        }
+        if remap.is_empty() {
+            return;
+        }
+        for &id in &order {
+            let mapped = self.nodes[id.index()]
+                .map_children(|child| remap.get(&child).copied().unwrap_or(child));
+            self.nodes[id.index()] = mapped;
+        }
+    }
+
+    fn is_xs_op(&self, id: NodeId) -> bool {
+        matches!(
+            self.nodes[id.index()],
+            Node::Rank(_) | Node::Scale(..) | Node::GroupRank(..) | Node::GroupNeutralize(..)
+        )
     }
 
     fn eval_node(&self, id: NodeId, slots: &[Option<Arc<DagVal>>], cs: &CellSet) -> Result<DagVal> {
@@ -651,21 +744,28 @@ impl Dag {
                 cs,
                 |lhs, rhs, cs| covariance(lhs, rhs, days, cs),
             ),
-            Node::Rank(inner) => eval_xs_unary(slot_value(slots, inner), cs, rank),
-            Node::Scale(inner, scale_to) => {
-                eval_xs_unary(slot_value(slots, inner), cs, |values, layout, cs| {
-                    scale(values, layout, f64::from_bits(scale_to), cs)
-                })
+            Node::Rank(inner) => {
+                eval_xs_unary(slot_value(slots, inner), self.cells_layout(id), cs, rank)
             }
+            Node::Scale(inner, scale_to) => eval_xs_unary(
+                slot_value(slots, inner),
+                self.cells_layout(id),
+                cs,
+                |values, input_layout, output, cs| {
+                    scale(values, input_layout, output, f64::from_bits(scale_to), cs)
+                },
+            ),
             Node::GroupRank(values, groups) => eval_xs_binary(
                 slot_value(slots, values),
                 slot_value(slots, groups),
+                self.cells_layout(id),
                 cs,
                 group_rank,
             ),
             Node::GroupNeutralize(values, groups) => eval_xs_binary(
                 slot_value(slots, values),
                 slot_value(slots, groups),
+                self.cells_layout(id),
                 cs,
                 group_neutralize,
             ),
@@ -729,6 +829,7 @@ pub(crate) fn eval_alphas(
         .map(|(_, expr)| dag.lower(expr))
         .collect::<Vec<_>>();
     dag.fuse_single_use_transposes(&roots);
+    dag.fuse_xs_output_transposes(&roots);
     let values = dag.eval_roots(&roots, cs)?;
 
     // Materializing each root (transpose to Tn + clone) is independent per
@@ -856,33 +957,42 @@ fn cells_and_layout<'a>(value: &'a DagVal, cs: &CellSet) -> (Cow<'a, [f64]>, Lay
     }
 }
 
-/// Cross-sectional unary op: feed the input in its native layout (no forced
-/// transpose) and emit a Tn result.
+/// Cross-sectional unary op: read the input in its native layout and emit the
+/// result directly in `output` (no follow-up transpose when `output` is Nt).
 fn eval_xs_unary(
     value: &DagVal,
+    output: Layout,
     cs: &CellSet,
-    kernel: impl FnOnce(&[f64], Layout, &CellSet) -> Vec<f64>,
+    kernel: impl FnOnce(&[f64], Layout, Layout, &CellSet) -> Vec<f64>,
 ) -> DagVal {
-    let (values, layout) = cells_and_layout(value, cs);
+    let (values, input_layout) = cells_and_layout(value, cs);
     DagVal::Cells {
-        values: Arc::new(kernel(&values, layout, cs)),
-        layout: Layout::Tn,
+        values: Arc::new(kernel(&values, input_layout, output, cs)),
+        layout: output,
     }
 }
 
 /// Cross-sectional binary op (value + group key): each input is read in its own
-/// native layout.
+/// native layout and the result is emitted directly in `output`.
 fn eval_xs_binary(
     values: &DagVal,
     groups: &DagVal,
+    output: Layout,
     cs: &CellSet,
-    kernel: impl FnOnce(&[f64], Layout, &[f64], Layout, &CellSet) -> Vec<f64>,
+    kernel: impl FnOnce(&[f64], Layout, &[f64], Layout, Layout, &CellSet) -> Vec<f64>,
 ) -> DagVal {
     let (values, values_layout) = cells_and_layout(values, cs);
     let (groups, groups_layout) = cells_and_layout(groups, cs);
     DagVal::Cells {
-        values: Arc::new(kernel(&values, values_layout, &groups, groups_layout, cs)),
-        layout: Layout::Tn,
+        values: Arc::new(kernel(
+            &values,
+            values_layout,
+            &groups,
+            groups_layout,
+            output,
+            cs,
+        )),
+        layout: output,
     }
 }
 
@@ -988,6 +1098,7 @@ mod tests {
         let mut dag = Dag::default();
         let root = dag.lower(expr);
         dag.fuse_single_use_transposes(&[root]);
+        dag.fuse_xs_output_transposes(&[root]);
         let values = dag.eval_roots(&[root], cs)?;
         Ok(to_cells(&values[0], Layout::Tn, cs))
     }
