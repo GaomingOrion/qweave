@@ -140,14 +140,14 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
         Expr::Rank(inner) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: rank(&values, cs),
+                values: rank(&values, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
         Expr::Scale(inner, scale_to) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: scale(&values, *scale_to, cs),
+                values: scale(&values, Layout::Tn, *scale_to, cs),
                 layout: Layout::Tn,
             })
         }
@@ -155,7 +155,7 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: group_rank(&values, &groups, cs),
+                values: group_rank(&values, Layout::Tn, &groups, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
@@ -163,7 +163,7 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
             Ok(Val::Cells {
-                values: group_neutralize(&values, &groups, cs),
+                values: group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, cs),
                 layout: Layout::Tn,
             })
         }
@@ -644,44 +644,59 @@ fn ts_deque_window(
     })
 }
 
+/// Read the cell at Tn position `tn_idx` from a buffer in either layout: a Tn
+/// buffer is contiguous (`values[tn_idx]`), an Nt buffer is gathered through
+/// `tn_order`. This lets cross-sectional ops consume an Nt input directly,
+/// skipping a materialized transpose, while still grouping by time block.
+#[inline]
+fn read_cell(values: &[f64], layout: Layout, tn_idx: usize, cs: &CellSet) -> f64 {
+    match layout {
+        Layout::Tn => values[tn_idx],
+        Layout::Nt => values[cs.tn_order[tn_idx]],
+    }
+}
+
 fn xs_per_block(
     values: &[f64],
+    layout: Layout,
     cs: &CellSet,
     f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
     par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
         let present = block
             .clone()
-            .filter_map(|idx| {
-                let value = values[idx];
-                (!value.is_nan()).then_some((idx, value))
+            .filter_map(|tn_idx| {
+                let value = read_cell(values, layout, tn_idx, cs);
+                (!value.is_nan()).then_some((tn_idx, value))
             })
             .collect::<Vec<_>>();
 
-        for (idx, value) in f(&present) {
-            out_block[idx - block.start] = value;
+        for (tn_idx, value) in f(&present) {
+            out_block[tn_idx - block.start] = value;
         }
     })
 }
 
 fn xs_per_group(
     values: &[f64],
+    values_layout: Layout,
     groups: &[f64],
+    groups_layout: Layout,
     cs: &CellSet,
     f: impl Fn(&[(usize, f64)]) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
     par_fill_blocks(values.len(), &cs.time_blocks, |block, out_block| {
         let mut buckets: HashMap<u64, Vec<(usize, f64)>> = HashMap::new();
-        for idx in block.clone() {
-            let value = values[idx];
-            let group = groups[idx];
+        for tn_idx in block.clone() {
+            let value = read_cell(values, values_layout, tn_idx, cs);
+            let group = read_cell(groups, groups_layout, tn_idx, cs);
             if value.is_nan() || group.is_nan() {
                 continue;
             }
             buckets
                 .entry(group.to_bits())
                 .or_default()
-                .push((idx, value));
+                .push((tn_idx, value));
         }
 
         for bucket in buckets.values() {
@@ -800,12 +815,12 @@ pub(crate) fn covariance(lhs: &[f64], rhs: &[f64], days: usize, cs: &CellSet) ->
     ts_window2(lhs, rhs, days, cs, covariance_window)
 }
 
-pub(crate) fn rank(values: &[f64], cs: &CellSet) -> Vec<f64> {
-    xs_per_block(values, cs, rank_pairs)
+pub(crate) fn rank(values: &[f64], layout: Layout, cs: &CellSet) -> Vec<f64> {
+    xs_per_block(values, layout, cs, rank_pairs)
 }
 
-pub(crate) fn scale(values: &[f64], scale_to: f64, cs: &CellSet) -> Vec<f64> {
-    xs_per_block(values, cs, |present| {
+pub(crate) fn scale(values: &[f64], layout: Layout, scale_to: f64, cs: &CellSet) -> Vec<f64> {
+    xs_per_block(values, layout, cs, |present| {
         let denom = present.iter().map(|(_, value)| value.abs()).sum::<f64>();
         if denom == 0.0 {
             return Vec::new();
@@ -817,12 +832,24 @@ pub(crate) fn scale(values: &[f64], scale_to: f64, cs: &CellSet) -> Vec<f64> {
     })
 }
 
-pub(crate) fn group_rank(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
-    xs_per_group(values, groups, cs, rank_pairs)
+pub(crate) fn group_rank(
+    values: &[f64],
+    values_layout: Layout,
+    groups: &[f64],
+    groups_layout: Layout,
+    cs: &CellSet,
+) -> Vec<f64> {
+    xs_per_group(values, values_layout, groups, groups_layout, cs, rank_pairs)
 }
 
-pub(crate) fn group_neutralize(values: &[f64], groups: &[f64], cs: &CellSet) -> Vec<f64> {
-    xs_per_group(values, groups, cs, |present| {
+pub(crate) fn group_neutralize(
+    values: &[f64],
+    values_layout: Layout,
+    groups: &[f64],
+    groups_layout: Layout,
+    cs: &CellSet,
+) -> Vec<f64> {
+    xs_per_group(values, values_layout, groups, groups_layout, cs, |present| {
         let mean = present.iter().map(|(_, value)| value).sum::<f64>() / present.len() as f64;
         present
             .iter()

@@ -458,6 +458,44 @@ impl Dag {
         counts
     }
 
+    /// Drop the materialized transpose in front of a cross-sectional op when that
+    /// op is its only consumer: the op gathers its input directly from the source
+    /// layout instead (see `xs_per_block`/`xs_per_group`). A transpose with two or
+    /// more consumers stays — materializing once and sharing the contiguous Tn
+    /// buffer beats re-gathering it per consumer. Value-preserving (the gather
+    /// reads the same cells), so the golden baseline is unaffected.
+    fn fuse_single_use_transposes(&mut self, roots: &[NodeId]) {
+        let order = self.reachable_order(roots);
+        let counts = self.consumer_counts(&order, roots);
+        for &id in &order {
+            let fused = match &self.nodes[id.index()] {
+                Node::Rank(inner) => Node::Rank(self.bypass_lone_transpose(*inner, &counts)),
+                Node::Scale(inner, scale_to) => {
+                    Node::Scale(self.bypass_lone_transpose(*inner, &counts), *scale_to)
+                }
+                Node::GroupRank(values, groups) => Node::GroupRank(
+                    self.bypass_lone_transpose(*values, &counts),
+                    self.bypass_lone_transpose(*groups, &counts),
+                ),
+                Node::GroupNeutralize(values, groups) => Node::GroupNeutralize(
+                    self.bypass_lone_transpose(*values, &counts),
+                    self.bypass_lone_transpose(*groups, &counts),
+                ),
+                _ => continue,
+            };
+            self.nodes[id.index()] = fused;
+        }
+    }
+
+    fn bypass_lone_transpose(&self, input: NodeId, counts: &[usize]) -> NodeId {
+        if counts[input.index()] == 1 {
+            if let Node::Transpose(child) = self.nodes[input.index()] {
+                return child;
+            }
+        }
+        input
+    }
+
     fn eval_node(&self, id: NodeId, slots: &[Option<Arc<DagVal>>], cs: &CellSet) -> Result<DagVal> {
         Ok(match self.nodes[id.index()] {
             Node::Field(ref name) => {
@@ -613,29 +651,21 @@ impl Dag {
                 cs,
                 |lhs, rhs, cs| covariance(lhs, rhs, days, cs),
             ),
-            Node::Rank(inner) => {
-                eval_cells_unary(slot_value(slots, inner), Layout::Tn, Layout::Tn, cs, rank)
+            Node::Rank(inner) => eval_xs_unary(slot_value(slots, inner), cs, rank),
+            Node::Scale(inner, scale_to) => {
+                eval_xs_unary(slot_value(slots, inner), cs, |values, layout, cs| {
+                    scale(values, layout, f64::from_bits(scale_to), cs)
+                })
             }
-            Node::Scale(inner, scale_to) => eval_cells_unary(
-                slot_value(slots, inner),
-                Layout::Tn,
-                Layout::Tn,
-                cs,
-                |values, cs| scale(values, f64::from_bits(scale_to), cs),
-            ),
-            Node::GroupRank(values, groups) => eval_cells_binary(
+            Node::GroupRank(values, groups) => eval_xs_binary(
                 slot_value(slots, values),
                 slot_value(slots, groups),
-                Layout::Tn,
-                Layout::Tn,
                 cs,
                 group_rank,
             ),
-            Node::GroupNeutralize(values, groups) => eval_cells_binary(
+            Node::GroupNeutralize(values, groups) => eval_xs_binary(
                 slot_value(slots, values),
                 slot_value(slots, groups),
-                Layout::Tn,
-                Layout::Tn,
                 cs,
                 group_neutralize,
             ),
@@ -698,6 +728,7 @@ pub(crate) fn eval_alphas(
         .iter()
         .map(|(_, expr)| dag.lower(expr))
         .collect::<Vec<_>>();
+    dag.fuse_single_use_transposes(&roots);
     let values = dag.eval_roots(&roots, cs)?;
 
     // Materializing each root (transpose to Tn + clone) is independent per
@@ -815,6 +846,46 @@ fn eval_cells_binary(
     }
 }
 
+/// Borrow a value's cells along with the layout they are stored in (a scalar is
+/// broadcast as Nt cells). Cross-sectional kernels take this layout and read
+/// their input in place, so an Nt input needs no transpose.
+fn cells_and_layout<'a>(value: &'a DagVal, cs: &CellSet) -> (Cow<'a, [f64]>, Layout) {
+    match value {
+        DagVal::Cells { values, layout } => (Cow::Borrowed(values.as_slice()), *layout),
+        DagVal::Scalar(value) => (Cow::Owned(vec![*value; cs.n_cells]), Layout::Nt),
+    }
+}
+
+/// Cross-sectional unary op: feed the input in its native layout (no forced
+/// transpose) and emit a Tn result.
+fn eval_xs_unary(
+    value: &DagVal,
+    cs: &CellSet,
+    kernel: impl FnOnce(&[f64], Layout, &CellSet) -> Vec<f64>,
+) -> DagVal {
+    let (values, layout) = cells_and_layout(value, cs);
+    DagVal::Cells {
+        values: Arc::new(kernel(&values, layout, cs)),
+        layout: Layout::Tn,
+    }
+}
+
+/// Cross-sectional binary op (value + group key): each input is read in its own
+/// native layout.
+fn eval_xs_binary(
+    values: &DagVal,
+    groups: &DagVal,
+    cs: &CellSet,
+    kernel: impl FnOnce(&[f64], Layout, &[f64], Layout, &CellSet) -> Vec<f64>,
+) -> DagVal {
+    let (values, values_layout) = cells_and_layout(values, cs);
+    let (groups, groups_layout) = cells_and_layout(groups, cs);
+    DagVal::Cells {
+        values: Arc::new(kernel(&values, values_layout, &groups, groups_layout, cs)),
+        layout: Layout::Tn,
+    }
+}
+
 fn eval_where(cond: &DagVal, when_true: &DagVal, when_false: &DagVal, cs: &CellSet) -> DagVal {
     let Some(layout) = first_value_layout(&[cond, when_true, when_false]) else {
         let DagVal::Scalar(cond) = cond else {
@@ -916,6 +987,7 @@ mod tests {
     fn eval_dag(expr: &Expr, cs: &CellSet) -> Result<Vec<f64>> {
         let mut dag = Dag::default();
         let root = dag.lower(expr);
+        dag.fuse_single_use_transposes(&[root]);
         let values = dag.eval_roots(&[root], cs)?;
         Ok(to_cells(&values[0], Layout::Tn, cs))
     }
