@@ -1,6 +1,6 @@
 [package]
 name = "qfactors-core"
-version = "0.2.0-dev"
+version = "0.2.0"
 description = "Core factor and alpha evaluation engine for qfactors"
 authors.workspace = true
 edition.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "qfactors-py"
-version = "0.2.0-dev"
+version = "0.2.0"
 description = "Python extension module for qfactors"
 authors.workspace = true
 edition.workspace = true
