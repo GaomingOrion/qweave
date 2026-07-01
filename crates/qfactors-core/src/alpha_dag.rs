@@ -22,6 +22,9 @@ fn max_nodes_in_flight() -> usize {
     2 * std::thread::available_parallelism().map_or(8, |n| n.get())
 }
 
+/// Cells per parallel chunk when running a fused-elementwise program.
+const FUSED_EW_CHUNK: usize = 8192;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct NodeId(u32);
 
@@ -68,6 +71,36 @@ enum Node {
     Max(NodeId, NodeId),
     Cmp(CmpOp, NodeId, NodeId),
     Where(NodeId, NodeId, NodeId),
+    /// A maximal single-use elementwise subtree collapsed into one node: `leaves`
+    /// are the (materialized) cell inputs and `program` is the RPN evaluated once
+    /// per cell, so the chain runs in a single pass with no intermediate buffers.
+    FusedEw {
+        leaves: Vec<NodeId>,
+        program: Vec<EwOp>,
+    },
+}
+
+/// One step of a fused-elementwise RPN program, evaluated against a small value
+/// stack. `Leaf(i)` pushes cell `i` of `leaves[i]`; the rest mirror the
+/// elementwise `Node` operators.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum EwOp {
+    Leaf(u32),
+    Const(u64),
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Neg,
+    Abs,
+    Log,
+    Sign,
+    SignedPower,
+    Power,
+    Min,
+    Max,
+    Cmp(CmpOp),
+    Where,
 }
 
 impl Node {
@@ -113,6 +146,11 @@ impl Node {
                 visit(*cond);
                 visit(*when_true);
                 visit(*when_false);
+            }
+            Node::FusedEw { leaves, .. } => {
+                for leaf in leaves {
+                    visit(*leaf);
+                }
             }
         }
     }
@@ -160,6 +198,10 @@ impl Node {
             Node::Where(cond, when_true, when_false) => {
                 Node::Where(map(*cond), map(*when_true), map(*when_false))
             }
+            Node::FusedEw { leaves, program } => Node::FusedEw {
+                leaves: leaves.iter().map(|leaf| map(*leaf)).collect(),
+                program: program.clone(),
+            },
         }
     }
 }
@@ -589,6 +631,112 @@ impl Dag {
         )
     }
 
+    /// Collapse each maximal single-use elementwise subtree into one `FusedEw`
+    /// node so the whole chain runs in a single per-cell pass (no intermediate
+    /// buffers). Value-preserving: the RPN performs exactly the same operations
+    /// in the same order, so the golden baseline is unaffected.
+    fn fuse_elementwise(&mut self, roots: &[NodeId]) {
+        let order = self.reachable_order(roots);
+        let counts = self.consumer_counts(&order, roots);
+        // An elementwise node is absorbed into its (single, elementwise) parent
+        // rather than materialized; anything else feeding an elementwise node is a
+        // leaf of the fused subtree.
+        let mut absorbed = vec![false; self.nodes.len()];
+        for &id in &order {
+            if is_elementwise(&self.nodes[id.index()]) {
+                self.nodes[id.index()].visit_children(|child| {
+                    if counts[child.index()] == 1 && is_elementwise(&self.nodes[child.index()]) {
+                        absorbed[child.index()] = true;
+                    }
+                });
+            }
+        }
+        for &id in &order {
+            if is_elementwise(&self.nodes[id.index()]) && !absorbed[id.index()] {
+                let mut leaves = Vec::new();
+                let mut leaf_index = HashMap::new();
+                let mut program = Vec::new();
+                self.emit_ew(id, &absorbed, &mut leaves, &mut leaf_index, &mut program);
+                // Only worth a fused node when at least two operators were merged;
+                // a lone op keeps its vectorized kernel (the VM would be slower).
+                let operators = program
+                    .iter()
+                    .filter(|op| !matches!(op, EwOp::Leaf(_) | EwOp::Const(_)))
+                    .count();
+                if operators >= 2 {
+                    self.nodes[id.index()] = Node::FusedEw { leaves, program };
+                }
+            }
+        }
+    }
+
+    fn emit_ew(
+        &self,
+        id: NodeId,
+        absorbed: &[bool],
+        leaves: &mut Vec<NodeId>,
+        leaf_index: &mut HashMap<NodeId, u32>,
+        program: &mut Vec<EwOp>,
+    ) {
+        macro_rules! unary {
+            ($a:expr, $op:expr) => {{
+                self.emit_ew_child(*$a, absorbed, leaves, leaf_index, program);
+                program.push($op);
+            }};
+        }
+        macro_rules! binary {
+            ($a:expr, $b:expr, $op:expr) => {{
+                self.emit_ew_child(*$a, absorbed, leaves, leaf_index, program);
+                self.emit_ew_child(*$b, absorbed, leaves, leaf_index, program);
+                program.push($op);
+            }};
+        }
+        match &self.nodes[id.index()] {
+            Node::Add(a, b) => binary!(a, b, EwOp::Add),
+            Node::Sub(a, b) => binary!(a, b, EwOp::Sub),
+            Node::Mul(a, b) => binary!(a, b, EwOp::Mul),
+            Node::Div(a, b) => binary!(a, b, EwOp::Div),
+            Node::Neg(a) => unary!(a, EwOp::Neg),
+            Node::Abs(a) => unary!(a, EwOp::Abs),
+            Node::Log(a) => unary!(a, EwOp::Log),
+            Node::Sign(a) => unary!(a, EwOp::Sign),
+            Node::SignedPower(a, b) => binary!(a, b, EwOp::SignedPower),
+            Node::Power(a, b) => binary!(a, b, EwOp::Power),
+            Node::Min(a, b) => binary!(a, b, EwOp::Min),
+            Node::Max(a, b) => binary!(a, b, EwOp::Max),
+            Node::Cmp(op, a, b) => binary!(a, b, EwOp::Cmp(*op)),
+            Node::Where(cond, when_true, when_false) => {
+                self.emit_ew_child(*cond, absorbed, leaves, leaf_index, program);
+                self.emit_ew_child(*when_true, absorbed, leaves, leaf_index, program);
+                self.emit_ew_child(*when_false, absorbed, leaves, leaf_index, program);
+                program.push(EwOp::Where);
+            }
+            _ => unreachable!("emit_ew called on non-elementwise node"),
+        }
+    }
+
+    fn emit_ew_child(
+        &self,
+        child: NodeId,
+        absorbed: &[bool],
+        leaves: &mut Vec<NodeId>,
+        leaf_index: &mut HashMap<NodeId, u32>,
+        program: &mut Vec<EwOp>,
+    ) {
+        if absorbed[child.index()] {
+            self.emit_ew(child, absorbed, leaves, leaf_index, program);
+        } else if let Node::Const(bits) = self.nodes[child.index()] {
+            program.push(EwOp::Const(bits));
+        } else {
+            let next = leaves.len() as u32;
+            let index = *leaf_index.entry(child).or_insert(next);
+            if index == next {
+                leaves.push(child);
+            }
+            program.push(EwOp::Leaf(index));
+        }
+    }
+
     fn eval_node(&self, id: NodeId, slots: &[Option<Arc<DagVal>>], cs: &CellSet) -> Result<DagVal> {
         Ok(match self.nodes[id.index()] {
             Node::Field(ref name) => {
@@ -806,7 +954,132 @@ impl Dag {
                 slot_value(slots, when_false),
                 cs,
             ),
+            Node::FusedEw {
+                ref leaves,
+                ref program,
+            } => eval_fused_ew(leaves, program, self.cells_layout(id), slots, cs),
         })
+    }
+}
+
+fn is_elementwise(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Add(..)
+            | Node::Sub(..)
+            | Node::Mul(..)
+            | Node::Div(..)
+            | Node::Neg(..)
+            | Node::Abs(..)
+            | Node::Log(..)
+            | Node::Sign(..)
+            | Node::SignedPower(..)
+            | Node::Power(..)
+            | Node::Min(..)
+            | Node::Max(..)
+            | Node::Cmp(..)
+            | Node::Where(..)
+    )
+}
+
+/// Evaluate a fused elementwise node: read each leaf in the shared layout, then
+/// run the RPN once per cell over a small reused stack. Parallel across cell
+/// chunks so a lone heavy fused node still uses every core (like the kernels).
+fn eval_fused_ew(
+    leaves: &[NodeId],
+    program: &[EwOp],
+    layout: Layout,
+    slots: &[Option<Arc<DagVal>>],
+    cs: &CellSet,
+) -> DagVal {
+    let leaf_cells: Vec<Cow<[f64]>> = leaves
+        .iter()
+        .map(|leaf| cells_for(slot_value(slots, *leaf), layout, cs))
+        .collect();
+    let mut out = vec![0.0f64; cs.n_cells];
+    out.par_chunks_mut(FUSED_EW_CHUNK)
+        .enumerate()
+        .for_each(|(chunk, out_chunk)| {
+            let base = chunk * FUSED_EW_CHUNK;
+            let mut stack: Vec<f64> = Vec::with_capacity(program.len());
+            for (offset, out_cell) in out_chunk.iter_mut().enumerate() {
+                let cell = base + offset;
+                stack.clear();
+                for op in program {
+                    match op {
+                        EwOp::Leaf(j) => stack.push(leaf_cells[*j as usize][cell]),
+                        EwOp::Const(bits) => stack.push(f64::from_bits(*bits)),
+                        EwOp::Add => {
+                            let b = stack.pop().unwrap();
+                            *stack.last_mut().unwrap() += b;
+                        }
+                        EwOp::Sub => {
+                            let b = stack.pop().unwrap();
+                            *stack.last_mut().unwrap() -= b;
+                        }
+                        EwOp::Mul => {
+                            let b = stack.pop().unwrap();
+                            *stack.last_mut().unwrap() *= b;
+                        }
+                        EwOp::Div => {
+                            let b = stack.pop().unwrap();
+                            *stack.last_mut().unwrap() /= b;
+                        }
+                        EwOp::Neg => {
+                            let a = stack.last_mut().unwrap();
+                            *a = -*a;
+                        }
+                        EwOp::Abs => {
+                            let a = stack.last_mut().unwrap();
+                            *a = a.abs();
+                        }
+                        EwOp::Log => {
+                            let a = stack.last_mut().unwrap();
+                            *a = log_value(*a);
+                        }
+                        EwOp::Sign => {
+                            let a = stack.last_mut().unwrap();
+                            *a = sign(*a);
+                        }
+                        EwOp::SignedPower => {
+                            let b = stack.pop().unwrap();
+                            let a = stack.last_mut().unwrap();
+                            *a = signed_power(*a, b);
+                        }
+                        EwOp::Power => {
+                            let b = stack.pop().unwrap();
+                            let a = stack.last_mut().unwrap();
+                            *a = a.powf(b);
+                        }
+                        EwOp::Min => {
+                            let b = stack.pop().unwrap();
+                            let a = stack.last_mut().unwrap();
+                            *a = min_value(*a, b);
+                        }
+                        EwOp::Max => {
+                            let b = stack.pop().unwrap();
+                            let a = stack.last_mut().unwrap();
+                            *a = max_value(*a, b);
+                        }
+                        EwOp::Cmp(op) => {
+                            let b = stack.pop().unwrap();
+                            let a = stack.last_mut().unwrap();
+                            *a = cmp_value(*op, *a, b);
+                        }
+                        EwOp::Where => {
+                            let when_false = stack.pop().unwrap();
+                            let when_true = stack.pop().unwrap();
+                            let cond = stack.last_mut().unwrap();
+                            *cond = where_value(*cond, when_true, when_false);
+                        }
+                    }
+                }
+                *out_cell = stack.pop().unwrap();
+            }
+        });
+    DagVal::Cells {
+        values: Arc::new(out),
+        layout,
     }
 }
 
@@ -830,6 +1103,7 @@ pub(crate) fn eval_alphas(
         .collect::<Vec<_>>();
     dag.fuse_single_use_transposes(&roots);
     dag.fuse_xs_output_transposes(&roots);
+    dag.fuse_elementwise(&roots);
     let values = dag.eval_roots(&roots, cs)?;
 
     // Materializing each root (transpose to Tn + clone) is independent per
@@ -1099,6 +1373,7 @@ mod tests {
         let root = dag.lower(expr);
         dag.fuse_single_use_transposes(&[root]);
         dag.fuse_xs_output_transposes(&[root]);
+        dag.fuse_elementwise(&[root]);
         let values = dag.eval_roots(&[root], cs)?;
         Ok(to_cells(&values[0], Layout::Tn, cs))
     }
