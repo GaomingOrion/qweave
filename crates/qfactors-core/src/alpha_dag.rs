@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use crate::alpha_eval::{
     cmp_value, correlation, covariance, decay_linear, delay, delta, group_neutralize, group_rank,
     log_value, max_value, min_value, product, rank, scale, sign, signed_power, ts_argmax,
-    ts_argmin, ts_max, ts_mean, ts_min, ts_rank, ts_std, ts_sum, where_value,
+    ts_argmin, ts_max, ts_mean, ts_min, ts_rank, ts_rank_raw, ts_std, ts_sum, where_value,
 };
 use crate::cellset::CellSet;
 use crate::error::{QFactorsError, Result};
@@ -54,6 +54,7 @@ enum Node {
     TsArgMin(NodeId, usize),
     TsArgMax(NodeId, usize),
     TsRank(NodeId, usize),
+    TsRankRaw(NodeId, usize),
     TsStd(NodeId, usize),
     DecayLinear(NodeId, usize),
     Correlation(NodeId, NodeId, usize),
@@ -119,6 +120,7 @@ impl Node {
             | Node::TsArgMin(inner, _)
             | Node::TsArgMax(inner, _)
             | Node::TsRank(inner, _)
+            | Node::TsRankRaw(inner, _)
             | Node::TsStd(inner, _)
             | Node::DecayLinear(inner, _)
             | Node::Rank(inner)
@@ -177,6 +179,7 @@ impl Node {
             Node::TsArgMin(inner, days) => Node::TsArgMin(map(*inner), *days),
             Node::TsArgMax(inner, days) => Node::TsArgMax(map(*inner), *days),
             Node::TsRank(inner, days) => Node::TsRank(map(*inner), *days),
+            Node::TsRankRaw(inner, days) => Node::TsRankRaw(map(*inner), *days),
             Node::TsStd(inner, days) => Node::TsStd(map(*inner), *days),
             Node::DecayLinear(inner, days) => Node::DecayLinear(map(*inner), *days),
             Node::Correlation(lhs, rhs, days) => Node::Correlation(map(*lhs), map(*rhs), *days),
@@ -254,6 +257,7 @@ impl Dag {
             Expr::TsArgMin(inner, days) => self.lower_ts_unary(inner, *days, Node::TsArgMin),
             Expr::TsArgMax(inner, days) => self.lower_ts_unary(inner, *days, Node::TsArgMax),
             Expr::TsRank(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRank),
+            Expr::TsRankRaw(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRankRaw),
             Expr::TsStd(inner, days) => self.lower_ts_unary(inner, *days, Node::TsStd),
             Expr::DecayLinear(inner, days) => self.lower_ts_unary(inner, *days, Node::DecayLinear),
             Expr::Correlation(lhs, rhs, days) => {
@@ -864,6 +868,13 @@ impl Dag {
                 Layout::Nt,
                 cs,
                 |values, cs| ts_rank(values, days, cs),
+            ),
+            Node::TsRankRaw(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ts_rank_raw(values, days, cs),
             ),
             Node::TsStd(inner, days) => eval_cells_unary(
                 slot_value(slots, inner),

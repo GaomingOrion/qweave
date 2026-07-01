@@ -29,6 +29,7 @@ pub enum Expr {
     TsArgMin(Box<Expr>, usize),
     TsArgMax(Box<Expr>, usize),
     TsRank(Box<Expr>, usize),
+    TsRankRaw(Box<Expr>, usize),
     TsStd(Box<Expr>, usize),
     DecayLinear(Box<Expr>, usize),
     Correlation(Box<Expr>, Box<Expr>, usize),
@@ -68,6 +69,7 @@ impl fmt::Display for Expr {
             Expr::TsArgMin(inner, days) => write!(f, "ts_arg_min({inner}, {days})"),
             Expr::TsArgMax(inner, days) => write!(f, "ts_arg_max({inner}, {days})"),
             Expr::TsRank(inner, days) => write!(f, "ts_rank({inner}, {days})"),
+            Expr::TsRankRaw(inner, days) => write!(f, "ts_rank_raw({inner}, {days})"),
             Expr::TsStd(inner, days) => write!(f, "ts_std({inner}, {days})"),
             Expr::DecayLinear(inner, days) => write!(f, "decay_linear({inner}, {days})"),
             Expr::Correlation(lhs, rhs, days) => write!(f, "correlation({lhs}, {rhs}, {days})"),
@@ -141,6 +143,7 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::TsArgMin(inner, _)
         | Expr::TsArgMax(inner, _)
         | Expr::TsRank(inner, _)
+        | Expr::TsRankRaw(inner, _)
         | Expr::TsStd(inner, _)
         | Expr::DecayLinear(inner, _)
         | Expr::Rank(inner)
@@ -165,6 +168,7 @@ pub(crate) fn lookback_depth(expr: &Expr) -> usize {
         | Expr::TsArgMin(inner, days)
         | Expr::TsArgMax(inner, days)
         | Expr::TsRank(inner, days)
+        | Expr::TsRankRaw(inner, days)
         | Expr::TsStd(inner, days)
         | Expr::DecayLinear(inner, days) => lookback_depth(inner) + days.saturating_sub(1),
         Expr::Correlation(lhs, rhs, days) | Expr::Covariance(lhs, rhs, days) => {

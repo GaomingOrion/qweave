@@ -107,6 +107,13 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
                 layout: Layout::Nt,
             })
         }
+        Expr::TsRankRaw(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(Val::Cells {
+                values: ts_rank_raw(&values, *days, cs),
+                layout: Layout::Nt,
+            })
+        }
         Expr::TsStd(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(Val::Cells {
@@ -776,37 +783,45 @@ pub(crate) fn ts_max(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 pub(crate) fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    // DolphinDB `mimin`: 0-based position of the minimum within the window,
+    // counted from the oldest day (0) to the current day (days - 1). The
+    // earliest occurrence wins on ties (strict `<` keeps the first minimum).
     ts_window(values, days, cs, |window| {
-        let mut best_days_ago = 0usize;
-        let mut best_value = window[window.len() - 1];
-        for days_ago in 1..window.len() {
-            let value = window[window.len() - 1 - days_ago];
+        let mut best_idx = 0usize;
+        let mut best_value = window[0];
+        for (idx, &value) in window.iter().enumerate().skip(1) {
             if value < best_value {
                 best_value = value;
-                best_days_ago = days_ago;
+                best_idx = idx;
             }
         }
-        best_days_ago as f64
+        best_idx as f64
     })
 }
 
 pub(crate) fn ts_argmax(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    // DolphinDB `mimax`: 0-based position of the maximum within the window,
+    // counted from the oldest day (0) to the current day (days - 1). The
+    // earliest occurrence wins on ties (strict `>` keeps the first maximum).
     ts_window(values, days, cs, |window| {
-        let mut best_days_ago = 0usize;
-        let mut best_value = window[window.len() - 1];
-        for days_ago in 1..window.len() {
-            let value = window[window.len() - 1 - days_ago];
+        let mut best_idx = 0usize;
+        let mut best_value = window[0];
+        for (idx, &value) in window.iter().enumerate().skip(1) {
             if value > best_value {
                 best_value = value;
-                best_days_ago = days_ago;
+                best_idx = idx;
             }
         }
-        best_days_ago as f64
+        best_idx as f64
     })
 }
 
 pub(crate) fn ts_rank(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, rank_last)
+}
+
+pub(crate) fn ts_rank_raw(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    ts_window(values, days, cs, rank_last_raw)
 }
 
 pub(crate) fn ts_std(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
@@ -937,6 +952,9 @@ fn rank_pairs(present: &[(usize, f64)]) -> Vec<(usize, f64)> {
     out
 }
 
+/// Percentile time-series rank (qfactors default). The current value's average
+/// rank over the window, normalized to `(0, 1]` — the convention most quant
+/// pipelines use (matches pandas `rank(pct=true)`), with ties averaged.
 fn rank_last(window: &[f64]) -> f64 {
     let target = window[window.len() - 1];
     let mut sorted = window.to_vec();
@@ -951,6 +969,14 @@ fn rank_last(window: &[f64]) -> f64 {
         .expect("target is in the sorted window")
         + 1;
     (start + 1 + end) as f64 / 2.0 / sorted.len() as f64
+}
+
+/// Raw time-series rank matching DolphinDB `mrank(x, true, d)`: the 0-based
+/// ascending position of the current value in `[0, d - 1]`, minimum on ties
+/// (i.e. the count of window values strictly smaller than it).
+fn rank_last_raw(window: &[f64]) -> f64 {
+    let target = window[window.len() - 1];
+    window.iter().filter(|&&value| value < target).count() as f64
 }
 
 fn covariance_window(lhs: &[f64], rhs: &[f64]) -> f64 {
@@ -1249,7 +1275,7 @@ mod tests {
                 )?,
                 &cs,
             ),
-            &[f64::NAN, f64::NAN, 1.0, 2.0, 1.0],
+            &[f64::NAN, f64::NAN, 1.0, 0.0, 0.0],
         );
         assert_vec_close(
             &cells(
@@ -1259,7 +1285,7 @@ mod tests {
                 )?,
                 &cs,
             ),
-            &[f64::NAN, f64::NAN, 2.0, 0.0, 0.0],
+            &[f64::NAN, f64::NAN, 0.0, 1.0, 2.0],
         );
         assert_vec_close(
             &cells(
@@ -1308,6 +1334,33 @@ mod tests {
             &nan_cs,
         );
         assert!(nan_out.iter().all(|value| value.is_nan()));
+        Ok(())
+    }
+
+    /// Locks `ts_argmax` / `ts_argmin` / `ts_rank_raw` to the DolphinDB
+    /// reference (`mimax` / `mimin` / `mrank`). Each series is a single 5-day
+    /// symbol with window 5, so only the final cell is defined; the value is the
+    /// DolphinDB toy output for that series. The default `ts_rank` is percentile
+    /// (see `single_input_ts_operators_match_hand_examples`); `ts_rank_raw` is
+    /// the DolphinDB-compatible caliber.
+    #[test]
+    fn ts_arg_and_rank_match_dolphindb_reference() -> Result<()> {
+        let last = |values: Vec<f64>, expr: Expr| -> Result<f64> {
+            let cs = test_cellset(values, one_block(0..5), vec![0..1, 1..2, 2..3, 3..4, 4..5]);
+            Ok(*cells(eval(&expr, &cs)?, &cs).last().unwrap())
+        };
+        let arg_max = |v| Expr::TsArgMax(Box::new(Expr::Field("x".to_string())), v);
+        let arg_min = |v| Expr::TsArgMin(Box::new(Expr::Field("x".to_string())), v);
+        let ts_rank_raw = |v| Expr::TsRankRaw(Box::new(Expr::Field("x".to_string())), v);
+
+        // mimax: position from oldest (0), earliest max wins on ties.
+        assert_eq!(last(vec![1.0, 2.0, 3.0, 4.0, 5.0], arg_max(5))?, 4.0);
+        assert_eq!(last(vec![5.0, 1.0, 2.0, 5.0, 3.0], arg_max(5))?, 0.0);
+        // mimin: position from oldest, earliest min wins on ties.
+        assert_eq!(last(vec![5.0, 4.0, 3.0, 2.0, 1.0], arg_min(5))?, 4.0);
+        // mrank: 0-based ascending rank of the current value, minimum on ties.
+        assert_eq!(last(vec![1.0, 2.0, 3.0, 4.0, 5.0], ts_rank_raw(5))?, 4.0);
+        assert_eq!(last(vec![1.0, 2.0, 5.0, 4.0, 5.0], ts_rank_raw(5))?, 3.0);
         Ok(())
     }
 

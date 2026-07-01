@@ -24,6 +24,63 @@ This manifest records the implementation defaults for the built-in `alpha1` thro
 - `IndClass.sector`, `IndClass.industry`, and `IndClass.subindustry` map to numeric
   input columns named `sector`, `industry`, and `subindustry`.
 
+## Operator calibers
+
+The paper leaves several operators under-specified, and reference implementations
+disagree. These are the concrete calibers qfactors uses. Where relevant the
+DolphinDB `wq101alpha.dos` reference is noted, since it is a common cross-check.
+
+- **`rank(x)` (cross-sectional):** percentile. Within each cross-section over the
+  non-NaN cells, `rank = (average 1-based ascending rank) / N`, ties averaged.
+  Range `(0, 1]` (minimum `1/N`, maximum `1`). NaN inputs are excluded from the
+  cross-section and remain NaN. DolphinDB `rowRank(percent=true)` agrees for
+  distinct values but takes the *minimum* rank on ties; the two differ only when
+  ties occur (e.g. ranking booleans or `sign(...)`).
+- **`ts_rank(x, d)` (time-series): percentile by default.** `(average 1-based rank
+  of the current value within the window) / d`, ties averaged, range `(0, 1]`.
+  This is the convention most quant pipelines use (pandas `rank(pct=true)`).
+  `ts_rank_raw(x, d)` exposes the DolphinDB `mrank(x, true, d)` caliber instead:
+  0-based ascending rank in `[0, d-1]`, minimum on ties. The default alphas use
+  the percentile `ts_rank`.
+- **`ts_argmax(x, d)` / `ts_argmin(x, d)`:** 0-based position of the extreme value
+  within the window, counted from the oldest day (`0`) to the current day (`d-1`);
+  the earliest occurrence wins on ties. Matches DolphinDB `mimax` / `mimin`.
+- **Comparisons (`<, >, <=, >=, ==`) and `where(cond, a, b)`:** NaN propagates. Any
+  NaN operand yields NaN, and a NaN condition yields NaN — qfactors never coerces
+  NaN to a boolean. (DolphinDB instead treats NULL as −∞ in comparisons, so its
+  boolean results are always defined; this is why DolphinDB reports more finite
+  cells during warmup for comparison/boolean alphas.)
+- **Rolling windows** (`ts_sum`, `ts_mean`, `ts_std`, `ts_min`, `ts_max`,
+  `ts_argmax`, `ts_argmin`, `ts_rank`, `decay_linear`, `correlation`,
+  `covariance`, `product`): require a full window with no interior NaN, otherwise
+  the output is NaN. (DolphinDB skips NULLs inside the window and emits a value
+  once `d` positions exist, so it again reports more finite cells.)
+- **Misc:** `signed_power(x, p) = sign(x) * |x|^p`; `log(x)` is the natural log for
+  `x > 0` and NaN otherwise; `ts_std` and `covariance` use the sample denominator
+  `n - 1`; `scale(x, a)` normalizes each cross-section so `sum(|x|) = a`
+  (default `a = 1`).
+
+## Caliber notes and cross-reference differences
+
+Places where a formula's result depends on a caliber choice above, or where a
+common reference diverges. Useful when reconciling qfactors against another engine.
+
+- **`ts_rank` scale-sensitive alphas:** `alpha4`, `alpha35`, `alpha43`, `alpha52`,
+  `alpha84` consume `ts_rank` in an arithmetic context, so their magnitude depends
+  on the percentile-vs-raw caliber. They match DolphinDB only under `ts_rank_raw`.
+- **`ts_argmax` / `ts_argmin` alphas:** `alpha1`, `alpha57`, `alpha60`, `alpha96`,
+  `alpha98`, `alpha100` depend on the position caliber (from oldest, earliest tie).
+- **`alpha14`:** qfactors follows the paper's `correlation(open, volume, 10)`.
+  DolphinDB's reference uses covariance (`mcovar`) here, which differs in scale by
+  orders of magnitude.
+- **`alpha83`:** qfactors follows the paper grouping
+  `... / ((high - low) / (sum(close, 5) / 5) / (vwap - close))`. DolphinDB's
+  reference evaluates the trailing chained division left-to-right, a different
+  grouping.
+- **`alpha42`:** `rank(vwap - close) / rank(vwap + close)` is sensitive to the
+  `vwap` definition and to small denominator ranks; confirm the `vwap` input
+  matches before comparing engines.
+
 ## Coverage Tiers
 
 - A: base OHLCV formulas. Required columns are `open`, `high`, `low`, `close`,

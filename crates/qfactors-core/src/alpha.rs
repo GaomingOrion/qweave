@@ -125,6 +125,12 @@ pub fn ts_rank(x: A, d: usize) -> A {
     A(Expr::TsRank(Box::new(x.into_expr()), d))
 }
 
+/// DolphinDB-compatible raw time-series rank (`mrank`): 0-based, minimum on
+/// ties. The default [`ts_rank`] returns the percentile caliber instead.
+pub fn ts_rank_raw(x: A, d: usize) -> A {
+    A(Expr::TsRankRaw(Box::new(x.into_expr()), d))
+}
+
 pub fn stddev(x: A, d: usize) -> A {
     A(Expr::TsStd(Box::new(x.into_expr()), d))
 }
