@@ -1001,18 +1001,16 @@ fn rank_pairs(present: &[(usize, f64)]) -> Vec<(usize, f64)> {
 /// pipelines use (matches pandas `rank(pct=true)`), with ties averaged.
 fn rank_last(window: &[f64]) -> f64 {
     let target = window[window.len() - 1];
-    let mut sorted = window.to_vec();
-    sorted.sort_by(|lhs, rhs| lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal));
-    let start = sorted
-        .iter()
-        .position(|value| *value == target)
-        .expect("target is in the sorted window");
-    let end = sorted
-        .iter()
-        .rposition(|value| *value == target)
-        .expect("target is in the sorted window")
-        + 1;
-    (start + 1 + end) as f64 / 2.0 / sorted.len() as f64
+    let mut less = 0usize;
+    let mut eq = 0usize;
+    for value in window {
+        if *value < target {
+            less += 1;
+        } else if *value == target {
+            eq += 1;
+        }
+    }
+    (less + 1 + less + eq) as f64 / 2.0 / window.len() as f64
 }
 
 /// Raw time-series rank matching DolphinDB `mrank(x, true, d)`: the 0-based
