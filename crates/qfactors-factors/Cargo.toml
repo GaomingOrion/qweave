@@ -1,6 +1,6 @@
 [package]
 name = "qfactors-factors"
-version = "0.3.1"
+version = "0.4.0"
 description = "Built-in qfactors factor and WorldQuant 101 definitions"
 authors.workspace = true
 edition.workspace = true

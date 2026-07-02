@@ -9,6 +9,25 @@ and patch versions should remain backward compatible within a minor line.
 
 - None.
 
+## v0.4.0 - 2026-07-02
+
+- Added `qfactors.qlib_alpha158(input_alias, alphas=None)` — the Qlib Alpha158
+  feature set (9 kbar + 4 price + 29 rolling groups × 5 windows = 158 factors)
+  as alpha expressions. See `docs/qlib_alpha158.md` for caliber notes.
+- Added `slope`, `rsquare`, `resi`, and `quantile` as expression kernels
+  (`PyExpr` methods and Rust builders) backing the Alpha158 regression and
+  quantile factors.
+- Added `PyExpr.output_name()` to read an expression's alias, so `list[PyExpr]`
+  results can be filtered by factor name.
+- Breaking: renamed Python `worldquant101_alphas(...)` to
+  `worldquant_alpha101(...)`.
+- Breaking: removed the factor-kernel Python API (`compute_panel(...)` and
+  `factor_catalog()`). All built-in factors are now alpha expressions computed
+  through `compute_alphas` / `with_alphas`.
+- Removed the `qfactors-macros` crate and the `#[factor]`/`#[alpha]` registries;
+  the WorldQuant 101 and Alpha158 sets are plain Rust builders returning
+  `Vec<(String, Expr)>`.
+
 ## v0.3.1 - 2026-07-02
 
 - Removed the undocumented `column_aliases` parameter from Python
