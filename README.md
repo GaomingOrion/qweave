@@ -127,8 +127,8 @@ original row order.
 Python functions:
 
 - `qfactors.compute_panel(df, symbol_col, time_col, factors, observation_times, column_aliases=None, output_path=None)`
-- `qfactors.compute_alphas(df, symbol_col, time_col, alphas, column_aliases=None, output_path=None)`
-- `qfactors.with_alphas(df, symbol_col, time_col, alphas, column_aliases=None)`
+- `qfactors.compute_alphas(df, symbol_col, time_col, alphas, output_path=None)`
+- `qfactors.with_alphas(df, symbol_col, time_col, alphas)`
 - `qfactors.col(name)`, `qfactors.lit(value)`, and expression operators
 - `qfactors.worldquant101_alphas(input_alias, alphas=None)`
 - `qfactors.factor_catalog()`
@@ -142,8 +142,17 @@ Input rules:
   data.
 - The engine sorts panel rows by `(symbol_col, time_col)` and rejects duplicate
   symbol-time pairs.
-- `column_aliases` maps logical names such as `close` to physical input columns
-  such as `adj_close`.
+- For `compute_panel`, `column_aliases` maps logical names such as `close` to
+  physical input columns such as `adj_close`. Alpha expressions use
+  `replace_inputs()` or `worldquant101_alphas(input_alias=...)` instead; the
+  alpha executors do not accept `column_aliases`.
+
+Memory note:
+
+- `with_alphas` preserves original input row order by scattering each evaluated
+  alpha column into a new full-size output buffer before appending it. For very
+  wide alpha batches, `compute_alphas` is the more memory-lean executor because
+  it can move evaluated columns directly into the result frame.
 
 ## Alpha Engine
 

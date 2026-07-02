@@ -49,6 +49,11 @@ Parquet and returns a summary dict. The current 0.3 implementation still
 materializes the full frame before writing; streaming/batched output is reserved
 for a later release.
 
+`with_alphas` preserves original row order by allocating one full-size output
+buffer per expression and scattering evaluated `(time, symbol)` values back into
+input order before appending the columns. For large batches, prefer
+`compute_alphas` when you do not need to keep the original DataFrame shape.
+
 ## Reuse Templates
 
 `collect_inputs()` reports canonical input fields, and `replace_inputs()` maps
@@ -61,6 +66,9 @@ assert expr.collect_inputs() == {"close", "open"}
 
 adjusted = expr.replace_inputs({"close": "adj_close", "open": "adj_open"})
 ```
+
+Alpha executors intentionally do not accept `column_aliases`; field remapping is
+part of the expression tree so there is only one visible aliasing path.
 
 ## WorldQuant 101
 

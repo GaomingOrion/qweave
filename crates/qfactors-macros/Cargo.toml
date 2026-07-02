@@ -1,6 +1,6 @@
 [package]
 name = "qfactors-macros"
-version = "0.3.0"
+version = "0.3.1"
 description = "Procedural macros for registering qfactors kernels"
 authors.workspace = true
 edition.workspace = true

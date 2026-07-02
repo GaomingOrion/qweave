@@ -9,6 +9,19 @@ and patch versions should remain backward compatible within a minor line.
 
 - None.
 
+## v0.3.1 - 2026-07-02
+
+- Removed the undocumented `column_aliases` parameter from Python
+  `compute_alphas(...)` and `with_alphas(...)`; alpha field remapping now only
+  uses `PyExpr.replace_inputs(...)` or `worldquant101_alphas(input_alias=...)`.
+- Documented the extra per-output scatter buffer used by `with_alphas` to
+  preserve original row order.
+- Changed `worldquant101_alphas(...)` to resolve names through the cached alpha
+  registry and reject non-WorldQuant names such as `group_returns_rank` and
+  `alpha102`.
+- Refactored field collection to use a shared field visitor instead of carrying
+  a second full AST traversal in `collect_fields`.
+
 ## v0.3.0 - 2026-07-01
 
 - Added the Python expression API (`PyExpr`) with column/literal constructors,

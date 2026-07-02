@@ -142,6 +142,28 @@ def test_expression_collect_inputs_replace_inputs_and_alias():
     assert out.get_column("mid").to_list() == [11.0]
 
 
+def test_alpha_executors_do_not_accept_column_aliases():
+    df = _alpha_input_frame()
+    expr = qfactors.col("close").alias("close_copy")
+
+    with pytest.raises(TypeError, match="column_aliases"):
+        qfactors.compute_alphas(
+            df,
+            symbol_col="asset",
+            time_col="time",
+            alphas=[expr],
+            column_aliases={"close": "adj_close"},
+        )
+    with pytest.raises(TypeError, match="column_aliases"):
+        qfactors.with_alphas(
+            df,
+            symbol_col="asset",
+            time_col="time",
+            alphas=[expr],
+            column_aliases={"close": "adj_close"},
+        )
+
+
 def test_worldquant101_alphas_returns_expression_subset_with_aliases():
     selected = qfactors.worldquant101_alphas({}, alphas=["alpha13", "alpha101"])
     catalog = qfactors._worldquant101_alphas()
@@ -150,6 +172,13 @@ def test_worldquant101_alphas_returns_expression_subset_with_aliases():
     assert set(catalog) == {f"alpha{idx}" for idx in range(1, 102)}
     assert selected[0].collect_inputs() == {"close", "volume"}
     assert "subindustry" in catalog["alpha100"].collect_inputs()
+
+
+def test_worldquant101_alphas_rejects_non_worldquant_names():
+    with pytest.raises(ValueError, match="factor `group_returns_rank` is not known"):
+        qfactors.worldquant101_alphas({}, alphas=["group_returns_rank"])
+    with pytest.raises(ValueError, match="factor `alpha102` is not known"):
+        qfactors.worldquant101_alphas({}, alphas=["alpha102"])
 
 
 def test_compute_panel_param_factor_matches_python_baseline():
@@ -332,24 +361,22 @@ def _compute_panel(df, observation_times, factors, column_aliases=None, output_p
     )
 
 
-def _compute_alphas(df, alphas, column_aliases=None, output_path=None):
+def _compute_alphas(df, alphas, output_path=None):
     return qfactors.compute_alphas(
         df,
         symbol_col="asset",
         time_col="time",
         alphas=alphas,
-        column_aliases=column_aliases,
         output_path=output_path,
     )
 
 
-def _with_alphas(df, alphas, column_aliases=None):
+def _with_alphas(df, alphas):
     return qfactors.with_alphas(
         df,
         symbol_col="asset",
         time_col="time",
         alphas=alphas,
-        column_aliases=column_aliases,
     )
 
 

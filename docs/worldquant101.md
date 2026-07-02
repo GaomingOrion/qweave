@@ -23,6 +23,8 @@ empty dict for identity mapping. `compute_alphas()` evaluates those expressions
 over the full `(time, symbol)` panel, while `with_alphas()` appends them to the
 input DataFrame in original row order. See
 [expression_api.md](expression_api.md) for custom expression construction.
+Alpha executors do not accept `column_aliases`; use `input_alias` or
+`PyExpr.replace_inputs()` for alpha field remapping.
 
 ## Defaults
 

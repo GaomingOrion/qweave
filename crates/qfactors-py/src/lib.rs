@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use polars::prelude::Series;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use pyo3_polars::{PyDataFrame, PySeries};
-use qfactors_core::alpha_registry::ALPHA_DESCRIPTORS;
+use qfactors_core::alpha_registry::{AlphaRegistry, alpha_registry};
 use qfactors_core::{
     ComputePanelOptions, ComputeResult, ComputeSummary, Expr, QFactorsError,
     compute_alphas as compute_alphas_core, compute_panel as compute_panel_core, factor_catalog,
@@ -93,23 +93,20 @@ fn factor_catalog_py() -> PyResult<PyDataFrame> {
     symbol_col,
     time_col,
     alphas,
-    column_aliases = None,
     output_path = None
 ))]
-#[allow(clippy::too_many_arguments)]
 fn compute_alphas_py(
     py: Python<'_>,
     df: PyDataFrame,
     symbol_col: &str,
     time_col: &str,
     alphas: Vec<Py<PyExpr>>,
-    column_aliases: Option<HashMap<String, String>>,
     output_path: Option<&str>,
 ) -> PyResult<Py<PyAny>> {
     let options = ComputePanelOptions {
         symbol_col: symbol_col.to_string(),
         time_col: time_col.to_string(),
-        column_aliases: column_aliases.unwrap_or_default(),
+        column_aliases: HashMap::new(),
     };
     let alphas = alpha_specs_from_py(py, alphas).map_err(to_py_err)?;
 
@@ -125,8 +122,7 @@ fn compute_alphas_py(
     df,
     symbol_col,
     time_col,
-    alphas,
-    column_aliases = None
+    alphas
 ))]
 fn with_alphas_py(
     py: Python<'_>,
@@ -134,12 +130,11 @@ fn with_alphas_py(
     symbol_col: &str,
     time_col: &str,
     alphas: Vec<Py<PyExpr>>,
-    column_aliases: Option<HashMap<String, String>>,
 ) -> PyResult<PyDataFrame> {
     let options = ComputePanelOptions {
         symbol_col: symbol_col.to_string(),
         time_col: time_col.to_string(),
-        column_aliases: column_aliases.unwrap_or_default(),
+        column_aliases: HashMap::new(),
     };
     let alphas = alpha_specs_from_py(py, alphas).map_err(to_py_err)?;
 
@@ -151,7 +146,7 @@ fn with_alphas_py(
 #[pyfunction(name = "_worldquant101_alphas")]
 fn worldquant101_alphas_dict_py(py: Python<'_>) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
-    for (name, expr) in worldquant101_exprs() {
+    for (name, expr) in worldquant101_exprs().map_err(to_py_err)? {
         dict.set_item(&name, PyExpr::named(&name, expr))?;
     }
     Ok(dict.into_any().unbind())
@@ -162,24 +157,17 @@ fn worldquant101_alphas_py(
     input_alias: HashMap<String, String>,
     alphas: Option<Vec<String>>,
 ) -> PyResult<Vec<PyExpr>> {
-    let input_alias = input_alias.into_iter().collect();
-    let all = worldquant101_exprs();
+    let input_alias: BTreeMap<String, String> = input_alias.into_iter().collect();
     let selected = match alphas {
         Some(names) => {
-            let by_name = all.into_iter().collect::<HashMap<_, _>>();
+            let registry = worldquant101_registry().map_err(to_py_err)?;
             names
                 .into_iter()
-                .map(|name| {
-                    let expr = by_name
-                        .get(&name)
-                        .cloned()
-                        .ok_or_else(|| QFactorsError::UnknownFactor(name.clone()))?;
-                    Ok((name, expr))
-                })
+                .map(|name| worldquant101_expr(registry, &name))
                 .collect::<qfactors_core::Result<Vec<_>>>()
                 .map_err(to_py_err)?
         }
-        None => all,
+        None => worldquant101_exprs().map_err(to_py_err)?,
     };
 
     Ok(selected
@@ -231,16 +219,29 @@ fn alpha_specs_from_py(
         .collect()
 }
 
-fn worldquant101_exprs() -> Vec<(String, Expr)> {
+fn worldquant101_registry() -> qfactors_core::Result<&'static AlphaRegistry> {
     qfactors_factors::ensure_linked();
-    let mut out = ALPHA_DESCRIPTORS
-        .iter()
-        .map(|factory| factory())
-        .filter(|descriptor| is_worldquant101_name(descriptor.name))
-        .map(|descriptor| (descriptor.name.to_string(), (descriptor.build)()))
-        .collect::<Vec<_>>();
-    out.sort_by_key(|item| alpha_number(&item.0));
-    out
+    alpha_registry()
+}
+
+fn worldquant101_exprs() -> qfactors_core::Result<Vec<(String, Expr)>> {
+    let registry = worldquant101_registry()?;
+    (1..=101)
+        .map(|idx| worldquant101_expr(registry, &format!("alpha{idx}")))
+        .collect()
+}
+
+fn worldquant101_expr(
+    registry: &AlphaRegistry,
+    name: &str,
+) -> qfactors_core::Result<(String, Expr)> {
+    if !is_worldquant101_name(name) {
+        return Err(QFactorsError::UnknownFactor(name.to_string()));
+    }
+    let descriptor = registry
+        .get(name)
+        .ok_or_else(|| QFactorsError::UnknownFactor(name.to_string()))?;
+    Ok((name.to_string(), (descriptor.build)()))
 }
 
 fn is_worldquant101_name(name: &str) -> bool {

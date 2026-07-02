@@ -63,7 +63,6 @@ def compute_alphas(
     symbol_col: str,
     time_col: str,
     alphas: Sequence[PyExpr],
-    column_aliases: dict[str, str] | None = None,
     output_path: str | None = None,
 ) -> pl.DataFrame | dict[str, Any]: ...
 
@@ -73,7 +72,6 @@ def with_alphas(
     symbol_col: str,
     time_col: str,
     alphas: Sequence[PyExpr],
-    column_aliases: dict[str, str] | None = None,
 ) -> pl.DataFrame: ...
 
 

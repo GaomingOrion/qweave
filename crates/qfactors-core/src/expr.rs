@@ -106,9 +106,15 @@ fn cmp_name(op: CmpOp) -> &'static str {
 }
 
 pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
+    visit_fields(expr, &mut |name| {
+        out.insert(name.to_string());
+    });
+}
+
+pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
     match expr {
         Expr::Field(name) => {
-            out.insert(name.clone());
+            visit(name);
         }
         Expr::Const(_) => {}
         Expr::Add(lhs, rhs)
@@ -124,13 +130,13 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::Covariance(lhs, rhs, _)
         | Expr::SignedPower(lhs, rhs)
         | Expr::Power(lhs, rhs) => {
-            collect_fields(lhs, out);
-            collect_fields(rhs, out);
+            visit_fields(lhs, visit);
+            visit_fields(rhs, visit);
         }
         Expr::Where(cond, when_true, when_false) => {
-            collect_fields(cond, out);
-            collect_fields(when_true, out);
-            collect_fields(when_false, out);
+            visit_fields(cond, visit);
+            visit_fields(when_true, visit);
+            visit_fields(when_false, visit);
         }
         Expr::Neg(inner)
         | Expr::Delay(inner, _)
@@ -151,7 +157,7 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::Abs(inner)
         | Expr::Log(inner)
         | Expr::Sign(inner) => {
-            collect_fields(inner, out);
+            visit_fields(inner, visit);
         }
     }
 }
