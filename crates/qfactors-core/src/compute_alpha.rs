@@ -88,7 +88,7 @@ fn alpha_engine() -> Result<AlphaEngine> {
 fn eval_exprs_tree(exprs: &[Expr], cs: &CellSet) -> Result<Vec<Vec<f64>>> {
     exprs
         .par_iter()
-        .map(|expr| Ok(to_cells(eval(expr, cs)?, Layout::Tn, cs)))
+        .map(|expr| Ok(to_cells(eval(expr, cs)?, Layout::Tn, cs).into_owned()))
         .collect()
 }
 

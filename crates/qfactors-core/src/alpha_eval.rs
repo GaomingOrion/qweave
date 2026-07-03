@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
@@ -10,18 +11,28 @@ use crate::expr::{CmpOp, Expr};
 use crate::layout::{Layout, nt_to_tn, tn_to_nt};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Val {
-    Cells { values: Vec<f64>, layout: Layout },
+pub enum Val<'cs> {
+    Cells {
+        values: Cow<'cs, [f64]>,
+        layout: Layout,
+    },
     Scalar(f64),
 }
 
-pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
+fn owned_cells<'cs>(values: Vec<f64>, layout: Layout) -> Val<'cs> {
+    Val::Cells {
+        values: Cow::Owned(values),
+        layout,
+    }
+}
+
+pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
     match expr {
         Expr::Field(name) => cs
             .fields
             .get(name)
             .map(|values| Val::Cells {
-                values: values.as_ref().clone(),
+                values: Cow::Borrowed(values.as_ref().as_slice()),
                 layout: Layout::Nt,
             })
             .ok_or_else(|| QFactorsError::MissingColumn(name.clone())),
@@ -32,175 +43,118 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
         Expr::Div(lhs, rhs) => eval_binary(lhs, rhs, cs, |a, b| a / b),
         Expr::Neg(inner) => match eval(inner, cs)? {
             Val::Scalar(value) => Ok(Val::Scalar(-value)),
-            Val::Cells { values, layout } => Ok(Val::Cells {
-                values: values.into_iter().map(|value| -value).collect(),
+            Val::Cells { values, layout } => Ok(owned_cells(
+                values.iter().map(|value| -*value).collect(),
                 layout,
-            }),
+            )),
         },
         Expr::Delay(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: delay(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(delay(&values, *days, cs), Layout::Nt))
         }
         Expr::Delta(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: delta(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(delta(&values, *days, cs), Layout::Nt))
         }
         Expr::TsSum(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_sum(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_sum(&values, *days, cs), Layout::Nt))
         }
         Expr::TsMean(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_mean(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_mean(&values, *days, cs), Layout::Nt))
         }
         Expr::Product(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: product(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(product(&values, *days, cs), Layout::Nt))
         }
         Expr::TsMin(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_min(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_min(&values, *days, cs), Layout::Nt))
         }
         Expr::TsMax(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_max(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_max(&values, *days, cs), Layout::Nt))
         }
         Expr::TsArgMin(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_argmin(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_argmin(&values, *days, cs), Layout::Nt))
         }
         Expr::TsArgMax(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_argmax(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_argmax(&values, *days, cs), Layout::Nt))
         }
         Expr::TsRank(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_rank(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_rank(&values, *days, cs), Layout::Nt))
         }
         Expr::TsRankRaw(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_rank_raw(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_rank_raw(&values, *days, cs), Layout::Nt))
         }
         Expr::TsStd(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: ts_std(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(ts_std(&values, *days, cs), Layout::Nt))
         }
         Expr::Slope(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: slope(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(slope(&values, *days, cs), Layout::Nt))
         }
         Expr::Rsquare(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: rsquare(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(rsquare(&values, *days, cs), Layout::Nt))
         }
         Expr::Resi(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: resi(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(resi(&values, *days, cs), Layout::Nt))
         }
         Expr::Quantile(inner, days, q) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: quantile(&values, *days, *q, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(quantile(&values, *days, *q, cs), Layout::Nt))
         }
         Expr::DecayLinear(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: decay_linear(&values, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(decay_linear(&values, *days, cs), Layout::Nt))
         }
         Expr::Correlation(lhs, rhs, days) => {
             let lhs = to_cells(eval(lhs, cs)?, Layout::Nt, cs);
             let rhs = to_cells(eval(rhs, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: correlation(&lhs, &rhs, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(correlation(&lhs, &rhs, *days, cs), Layout::Nt))
         }
         Expr::Covariance(lhs, rhs, days) => {
             let lhs = to_cells(eval(lhs, cs)?, Layout::Nt, cs);
             let rhs = to_cells(eval(rhs, cs)?, Layout::Nt, cs);
-            Ok(Val::Cells {
-                values: covariance(&lhs, &rhs, *days, cs),
-                layout: Layout::Nt,
-            })
+            Ok(owned_cells(covariance(&lhs, &rhs, *days, cs), Layout::Nt))
         }
         Expr::Rank(inner) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
-            Ok(Val::Cells {
-                values: rank(&values, Layout::Tn, Layout::Tn, cs),
-                layout: Layout::Tn,
-            })
+            Ok(owned_cells(
+                rank(&values, Layout::Tn, Layout::Tn, cs),
+                Layout::Tn,
+            ))
         }
         Expr::Scale(inner, scale_to) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
-            Ok(Val::Cells {
-                values: scale(&values, Layout::Tn, Layout::Tn, *scale_to, cs),
-                layout: Layout::Tn,
-            })
+            Ok(owned_cells(
+                scale(&values, Layout::Tn, Layout::Tn, *scale_to, cs),
+                Layout::Tn,
+            ))
         }
         Expr::GroupRank(values, groups) => {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
-            Ok(Val::Cells {
-                values: group_rank(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
-                layout: Layout::Tn,
-            })
+            Ok(owned_cells(
+                group_rank(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
+                Layout::Tn,
+            ))
         }
         Expr::GroupNeutralize(values, groups) => {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
             let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
-            Ok(Val::Cells {
-                values: group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
-                layout: Layout::Tn,
-            })
+            Ok(owned_cells(
+                group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
+                Layout::Tn,
+            ))
         }
         Expr::Abs(inner) => eval_unary(inner, cs, f64::abs),
         Expr::Log(inner) => eval_unary(inner, cs, log_value),
@@ -214,34 +168,39 @@ pub fn eval(expr: &Expr, cs: &CellSet) -> Result<Val> {
     }
 }
 
-pub fn to_cells(value: Val, want: Layout, cs: &CellSet) -> Vec<f64> {
+pub fn to_cells<'cs>(value: Val<'cs>, want: Layout, cs: &CellSet) -> Cow<'cs, [f64]> {
     match value {
-        Val::Scalar(value) => vec![value; cs.n_cells],
+        Val::Scalar(value) => Cow::Owned(vec![value; cs.n_cells]),
         Val::Cells { values, layout } if layout == want => values,
         Val::Cells {
             values,
             layout: Layout::Nt,
-        } => nt_to_tn(&values, cs),
+        } => Cow::Owned(nt_to_tn(&values, cs)),
         Val::Cells {
             values,
             layout: Layout::Tn,
-        } => tn_to_nt(&values, cs),
+        } => Cow::Owned(tn_to_nt(&values, cs)),
     }
 }
 
-fn eval_binary(lhs: &Expr, rhs: &Expr, cs: &CellSet, op: impl Fn(f64, f64) -> f64) -> Result<Val> {
+fn eval_binary<'cs>(
+    lhs: &Expr,
+    rhs: &Expr,
+    cs: &'cs CellSet,
+    op: impl Fn(f64, f64) -> f64,
+) -> Result<Val<'cs>> {
     let lhs = eval(lhs, cs)?;
     let rhs = eval(rhs, cs)?;
     match (lhs, rhs) {
         (Val::Scalar(lhs), Val::Scalar(rhs)) => Ok(Val::Scalar(op(lhs, rhs))),
-        (Val::Cells { values, layout }, Val::Scalar(rhs)) => Ok(Val::Cells {
-            values: values.into_iter().map(|lhs| op(lhs, rhs)).collect(),
+        (Val::Cells { values, layout }, Val::Scalar(rhs)) => Ok(owned_cells(
+            values.iter().map(|lhs| op(*lhs, rhs)).collect(),
             layout,
-        }),
-        (Val::Scalar(lhs), Val::Cells { values, layout }) => Ok(Val::Cells {
-            values: values.into_iter().map(|rhs| op(lhs, rhs)).collect(),
+        )),
+        (Val::Scalar(lhs), Val::Cells { values, layout }) => Ok(owned_cells(
+            values.iter().map(|rhs| op(lhs, *rhs)).collect(),
             layout,
-        }),
+        )),
         (
             Val::Cells {
                 values: lhs,
@@ -264,29 +223,33 @@ fn eval_binary(lhs: &Expr, rhs: &Expr, cs: &CellSet, op: impl Fn(f64, f64) -> f6
                     cs,
                 )
             };
-            Ok(Val::Cells {
-                values: lhs
-                    .into_iter()
-                    .zip(rhs)
-                    .map(|(lhs, rhs)| op(lhs, rhs))
+            Ok(owned_cells(
+                lhs.iter()
+                    .zip(rhs.iter())
+                    .map(|(lhs, rhs)| op(*lhs, *rhs))
                     .collect(),
                 layout,
-            })
+            ))
         }
     }
 }
 
-fn eval_unary(inner: &Expr, cs: &CellSet, op: impl Fn(f64) -> f64) -> Result<Val> {
+fn eval_unary<'cs>(inner: &Expr, cs: &'cs CellSet, op: impl Fn(f64) -> f64) -> Result<Val<'cs>> {
     match eval(inner, cs)? {
         Val::Scalar(value) => Ok(Val::Scalar(op(value))),
-        Val::Cells { values, layout } => Ok(Val::Cells {
-            values: values.into_iter().map(op).collect(),
+        Val::Cells { values, layout } => Ok(owned_cells(
+            values.iter().map(|value| op(*value)).collect(),
             layout,
-        }),
+        )),
     }
 }
 
-fn eval_where(cond: &Expr, when_true: &Expr, when_false: &Expr, cs: &CellSet) -> Result<Val> {
+fn eval_where<'cs>(
+    cond: &Expr,
+    when_true: &Expr,
+    when_false: &Expr,
+    cs: &'cs CellSet,
+) -> Result<Val<'cs>> {
     let cond = eval(cond, cs)?;
     let when_true = eval(when_true, cs)?;
     let when_false = eval(when_false, cs)?;
@@ -339,8 +302,8 @@ fn eval_where(cond: &Expr, when_true: &Expr, when_false: &Expr, cs: &CellSet) ->
         Val::Scalar(value) => *value,
         Val::Cells { values, .. } => values[idx],
     };
-    Ok(Val::Cells {
-        values: (0..cs.n_cells)
+    Ok(owned_cells(
+        (0..cs.n_cells)
             .map(|idx| {
                 where_value(
                     value_at(&cond, idx),
@@ -350,7 +313,7 @@ fn eval_where(cond: &Expr, when_true: &Expr, when_false: &Expr, cs: &CellSet) ->
             })
             .collect(),
         layout,
-    })
+    ))
 }
 
 pub(crate) fn delay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
@@ -1305,8 +1268,8 @@ mod tests {
         }
     }
 
-    fn cells(value: Val, cs: &CellSet) -> Vec<f64> {
-        to_cells(value, Layout::Nt, cs)
+    fn cells(value: Val<'_>, cs: &CellSet) -> Vec<f64> {
+        to_cells(value, Layout::Nt, cs).into_owned()
     }
 
     fn one_block(range: Range<usize>) -> Vec<Range<usize>> {
@@ -2070,7 +2033,7 @@ mod tests {
             Layout::Tn,
             &tie_cs,
         );
-        assert_eq!(tie_out, [0.25, 0.625, 0.625, 1.0]);
+        assert_vec_close(&tie_out, &[0.25, 0.625, 0.625, 1.0]);
 
         let dense_tie_cs = test_cellset(
             vec![2.0, 2.0, 1.0, 1.0, 3.0, 3.0],
@@ -2129,7 +2092,7 @@ mod tests {
         assert_eq!(
             out,
             Val::Cells {
-                values: vec![3.5, 4.5, 5.5],
+                values: Cow::Owned(vec![3.5, 4.5, 5.5]),
                 layout: Layout::Nt,
             }
         );

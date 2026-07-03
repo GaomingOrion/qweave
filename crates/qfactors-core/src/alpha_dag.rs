@@ -1439,7 +1439,7 @@ mod tests {
     }
 
     fn eval_tree(expr: &Expr, cs: &CellSet) -> Result<Vec<f64>> {
-        Ok(tree_to_cells(eval(expr, cs)?, Layout::Tn, cs))
+        Ok(tree_to_cells(eval(expr, cs)?, Layout::Tn, cs).into_owned())
     }
 
     fn assert_vec_close(actual: &[f64], expected: &[f64]) {
