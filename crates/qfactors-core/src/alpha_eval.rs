@@ -644,11 +644,18 @@ fn ts_rolling_decay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     })
 }
 
+/// Sliding-window min/max via a monotonic deque whose front is always the
+/// running extremum. `should_pop_back` decides when an incoming value evicts
+/// weaker candidates; `project` turns the surviving front (given `front_idx`
+/// and the window's `window_start`) into the emitted number — the extreme
+/// *value* for min/max, or its 0-based offset for the arg variants. NaNs never
+/// enter the deque and gate output through `nan_count`, exactly as `ts_window`.
 fn ts_deque_window(
     values: &[f64],
     days: usize,
     cs: &CellSet,
     should_pop_back: impl Fn(f64, f64) -> bool + Sync,
+    project: impl Fn(usize, usize) -> f64 + Sync,
 ) -> Vec<f64> {
     if days == 0 {
         return vec![f64::NAN; values.len()];
@@ -690,8 +697,8 @@ fn ts_deque_window(
                 }
 
                 if nan_count == 0 {
-                    let best_idx = *deque.front().expect("full non-NaN window has a value");
-                    *out_cell = values[best_idx];
+                    let front_idx = *deque.front().expect("full non-NaN window has a value");
+                    *out_cell = project(front_idx, window_start);
                 }
             }
         }
@@ -822,45 +829,51 @@ pub(crate) fn product(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 pub(crate) fn ts_min(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_deque_window(values, days, cs, |back, current| back >= current)
+    ts_deque_window(
+        values,
+        days,
+        cs,
+        |back, current| back >= current,
+        |front_idx, _| values[front_idx],
+    )
 }
 
 pub(crate) fn ts_max(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    ts_deque_window(values, days, cs, |back, current| back <= current)
+    ts_deque_window(
+        values,
+        days,
+        cs,
+        |back, current| back <= current,
+        |front_idx, _| values[front_idx],
+    )
 }
 
 pub(crate) fn ts_argmin(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     // DolphinDB `mimin`: 0-based position of the minimum within the window,
-    // counted from the oldest day (0) to the current day (days - 1). The
-    // earliest occurrence wins on ties (strict `<` keeps the first minimum).
-    ts_window(values, days, cs, |window| {
-        let mut best_idx = 0usize;
-        let mut best_value = window[0];
-        for (idx, &value) in window.iter().enumerate().skip(1) {
-            if value < best_value {
-                best_value = value;
-                best_idx = idx;
-            }
-        }
-        best_idx as f64
-    })
+    // counted from the oldest day (0) to the current day (days - 1). The deque
+    // front is the running minimum; the strict `>` pop keeps equal-minimum
+    // candidates queued so the earliest one stays at the front and wins ties.
+    ts_deque_window(
+        values,
+        days,
+        cs,
+        |back, current| back > current,
+        |front_idx, window_start| (front_idx - window_start) as f64,
+    )
 }
 
 pub(crate) fn ts_argmax(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     // DolphinDB `mimax`: 0-based position of the maximum within the window,
-    // counted from the oldest day (0) to the current day (days - 1). The
-    // earliest occurrence wins on ties (strict `>` keeps the first maximum).
-    ts_window(values, days, cs, |window| {
-        let mut best_idx = 0usize;
-        let mut best_value = window[0];
-        for (idx, &value) in window.iter().enumerate().skip(1) {
-            if value > best_value {
-                best_value = value;
-                best_idx = idx;
-            }
-        }
-        best_idx as f64
-    })
+    // counted from the oldest day (0) to the current day (days - 1). The deque
+    // front is the running maximum; the strict `<` pop keeps equal-maximum
+    // candidates queued so the earliest one stays at the front and wins ties.
+    ts_deque_window(
+        values,
+        days,
+        cs,
+        |back, current| back < current,
+        |front_idx, window_start| (front_idx - window_start) as f64,
+    )
 }
 
 pub(crate) fn ts_rank(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
@@ -1782,12 +1795,90 @@ mod tests {
         // mimax: position from oldest (0), earliest max wins on ties.
         assert_eq!(last(vec![1.0, 2.0, 3.0, 4.0, 5.0], arg_max(5))?, 4.0);
         assert_eq!(last(vec![5.0, 1.0, 2.0, 5.0, 3.0], arg_max(5))?, 0.0);
+        // Dense ties in the middle of the window: the earliest maximum wins.
+        assert_eq!(last(vec![3.0, 5.0, 5.0, 5.0, 1.0], arg_max(5))?, 1.0);
         // mimin: position from oldest, earliest min wins on ties.
         assert_eq!(last(vec![5.0, 4.0, 3.0, 2.0, 1.0], arg_min(5))?, 4.0);
+        // Dense ties in the middle of the window: the earliest minimum wins.
+        assert_eq!(last(vec![3.0, 1.0, 1.0, 1.0, 5.0], arg_min(5))?, 1.0);
         // mrank: 0-based ascending rank of the current value, minimum on ties.
         assert_eq!(last(vec![1.0, 2.0, 3.0, 4.0, 5.0], ts_rank_raw(5))?, 4.0);
         assert_eq!(last(vec![1.0, 2.0, 5.0, 4.0, 5.0], ts_rank_raw(5))?, 3.0);
         Ok(())
+    }
+
+    /// Brute-force ts_argmin/argmax over one block: 0-based offset of the
+    /// earliest extremum in each fully non-NaN window, NaN elsewhere.
+    fn reference_arg(values: &[f64], days: usize, blocks: &[Range<usize>], want_max: bool) -> Vec<f64> {
+        let mut out = vec![f64::NAN; values.len()];
+        for block in blocks {
+            for local_idx in 0..block.len() {
+                if local_idx + 1 < days {
+                    continue;
+                }
+                let start = block.start + local_idx + 1 - days;
+                let window = &values[start..=block.start + local_idx];
+                if window.iter().any(|v| v.is_nan()) {
+                    continue;
+                }
+                let mut best = 0usize;
+                for (i, &v) in window.iter().enumerate().skip(1) {
+                    if (want_max && v > window[best]) || (!want_max && v < window[best]) {
+                        best = i;
+                    }
+                }
+                out[block.start + local_idx] = best as f64;
+            }
+        }
+        out
+    }
+
+    /// Differential fuzz: the monotonic-deque arg kernels must agree bit-for-bit
+    /// with the brute-force scan across random panels. The palette leans on ties
+    /// (repeated values) so the strict-pop tie rule is exercised, plus signed
+    /// zeros, infinities, and NaNs that must slide through the window without
+    /// entering the deque.
+    #[test]
+    fn ts_arg_incremental_matches_brute_force_reference() {
+        let mut state = 0x243F6A8885A308D3u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let palette = [
+            0.0, -0.0, 1.0, 1.0, 2.0, 2.0, -3.0,
+            f64::INFINITY, f64::NEG_INFINITY, f64::NAN,
+        ];
+        for _ in 0..100 {
+            let len = 1 + (next() % 40) as usize;
+            let values: Vec<f64> = (0..len)
+                .map(|_| palette[(next() % palette.len() as u64) as usize])
+                .collect();
+            let mut blocks = Vec::new();
+            let mut start = 0;
+            while start < len {
+                let size = 1 + (next() % (len - start) as u64) as usize;
+                blocks.push(start..start + size);
+                start += size;
+            }
+            let cs = test_cellset(
+                values.clone(),
+                blocks.clone(),
+                (0..len).map(|idx| idx..idx + 1).collect(),
+            );
+            for days in 1..=6 {
+                assert_vec_same_numeric(
+                    &ts_argmin(&values, days, &cs),
+                    &reference_arg(&values, days, &blocks, false),
+                );
+                assert_vec_same_numeric(
+                    &ts_argmax(&values, days, &cs),
+                    &reference_arg(&values, days, &blocks, true),
+                );
+            }
+        }
     }
 
     #[test]
