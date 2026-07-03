@@ -902,7 +902,34 @@ pub(crate) fn resi(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 }
 
 pub(crate) fn quantile(values: &[f64], days: usize, q: f64, cs: &CellSet) -> Vec<f64> {
-    ts_window(values, days, cs, |window| quantile_window(window, q))
+    if days == 0 || !(0.0..=1.0).contains(&q) {
+        return vec![f64::NAN; values.len()];
+    }
+
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
+        let mut scratch = Vec::with_capacity(days);
+        let mut nan_count = 0usize;
+        for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
+            let idx = block.start + local_idx;
+            if values[idx].is_nan() {
+                nan_count += 1;
+            }
+
+            if local_idx >= days {
+                let old_idx = block.start + local_idx - days;
+                if values[old_idx].is_nan() {
+                    nan_count -= 1;
+                }
+            }
+
+            if local_idx + 1 >= days && nan_count == 0 {
+                let start = block.start + local_idx + 1 - days;
+                scratch.clear();
+                scratch.extend_from_slice(&values[start..=idx]);
+                *out_cell = quantile_scratch(&mut scratch, q);
+            }
+        }
+    })
 }
 
 pub(crate) fn decay_linear(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
@@ -1147,21 +1174,31 @@ fn resi_window(window: &[f64]) -> f64 {
     window[window.len() - 1] - y_mean - slope * (n - 1.0 - x_mean)
 }
 
-fn quantile_window(window: &[f64], q: f64) -> f64 {
+fn quantile_scratch(values: &mut [f64], q: f64) -> f64 {
     if !(0.0..=1.0).contains(&q) {
         return f64::NAN;
     }
+    if values.is_empty() {
+        return f64::NAN;
+    }
 
-    let mut sorted = window.to_vec();
-    sorted.sort_by(|lhs, rhs| lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal));
-    let pos = q * (sorted.len() - 1) as f64;
+    let pos = q * (values.len() - 1) as f64;
     let lo = pos.floor() as usize;
     let hi = pos.ceil() as usize;
+    let (_, lo_value, suffix) = values.select_nth_unstable_by(lo, |lhs, rhs| {
+        lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal)
+    });
+    let lo_value = *lo_value;
     if lo == hi {
-        sorted[lo]
+        lo_value
     } else {
         let frac = pos - lo as f64;
-        sorted[lo] + frac * (sorted[hi] - sorted[lo])
+        let hi_value = suffix
+            .iter()
+            .copied()
+            .min_by(|lhs, rhs| lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal))
+            .expect("non-integer quantile has a successor");
+        lo_value + frac * (hi_value - lo_value)
     }
 }
 
@@ -1302,6 +1339,25 @@ mod tests {
         }
     }
 
+    fn assert_vec_same_numeric(actual: &[f64], expected: &[f64]) {
+        assert_eq!(actual.len(), expected.len());
+        for (idx, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            if expected.is_nan() {
+                assert!(actual.is_nan(), "idx {idx}: actual {actual}, expected NaN");
+            } else if expected.is_infinite() {
+                assert_eq!(
+                    actual, expected,
+                    "idx {idx}: actual {actual}, expected {expected}"
+                );
+            } else {
+                assert!(
+                    (actual - expected).abs() < 1e-12,
+                    "idx {idx}: actual {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+
     fn two_pass_std(window: &[f64]) -> f64 {
         let mean = window.iter().sum::<f64>() / window.len() as f64;
         let variance = window
@@ -1313,6 +1369,48 @@ mod tests {
             .sum::<f64>()
             / (window.len() as f64 - 1.0);
         variance.sqrt()
+    }
+
+    fn reference_quantile(
+        values: &[f64],
+        days: usize,
+        q: f64,
+        blocks: &[Range<usize>],
+    ) -> Vec<f64> {
+        let mut out = vec![f64::NAN; values.len()];
+        if days == 0 || !(0.0..=1.0).contains(&q) {
+            return out;
+        }
+
+        for block in blocks {
+            for local_idx in 0..block.len() {
+                if local_idx + 1 < days {
+                    continue;
+                }
+                let idx = block.start + local_idx;
+                let start = idx + 1 - days;
+                let window = &values[start..=idx];
+                if window.iter().any(|value| value.is_nan()) {
+                    continue;
+                }
+                out[idx] = reference_quantile_window(window, q);
+            }
+        }
+        out
+    }
+
+    fn reference_quantile_window(window: &[f64], q: f64) -> f64 {
+        let mut sorted = window.to_vec();
+        sorted.sort_by(|lhs, rhs| lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal));
+        let pos = q * (sorted.len() - 1) as f64;
+        let lo = pos.floor() as usize;
+        let hi = pos.ceil() as usize;
+        if lo == hi {
+            sorted[lo]
+        } else {
+            let frac = pos - lo as f64;
+            sorted[lo] + frac * (sorted[hi] - sorted[lo])
+        }
     }
 
     #[test]
@@ -1571,6 +1669,41 @@ mod tests {
             &[f64::NAN, f64::NAN, 1.4, 1.4, 2.0],
         );
         Ok(())
+    }
+
+    #[test]
+    fn quantile_matches_sorted_windows_for_edge_values() {
+        let values = vec![
+            3.0,
+            -0.0,
+            0.0,
+            f64::INFINITY,
+            2.0,
+            2.0,
+            f64::NAN,
+            4.0,
+            f64::NEG_INFINITY,
+            4.0,
+            1.0,
+            -0.0,
+            0.0,
+            5.0,
+        ];
+        let blocks = vec![0..7, 7..values.len()];
+        let cs = test_cellset(
+            values.clone(),
+            blocks.clone(),
+            (0..values.len()).map(|idx| idx..idx + 1).collect(),
+        );
+
+        for days in 1..=5 {
+            for q in [0.0, 0.2, 0.5, 0.8, 1.0] {
+                assert_vec_same_numeric(
+                    &quantile(&values, days, q, &cs),
+                    &reference_quantile(&values, days, q, &blocks),
+                );
+            }
+        }
     }
 
     /// Locks `ts_argmax` / `ts_argmin` / `ts_rank_raw` to the DolphinDB
