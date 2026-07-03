@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, HashMap};
 
-use pyo3::exceptions::PyValueError;
+use polars::prelude::Series;
+use pyo3::exceptions::{PyUserWarning, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pyo3_polars::PyDataFrame;
+use pyo3_polars::{PyDataFrame, PySeries};
 use qfactors_core::{
     ComputeResult, ComputeSummary, Expr, PanelOptions, QFactorsError,
     compute_alphas as compute_alphas_core, with_alphas as with_alphas_core,
 };
+use qfactors_eval::{EvalError, LabelOptions, with_labels as with_labels_core};
 
 mod expr;
 use expr::PyExpr;
@@ -92,6 +94,82 @@ fn with_alphas_py(
         .map_err(to_py_err)
 }
 
+/// Append forward-return label columns `ret_{h}` (and `tradable_entry` when
+/// `tradable_col` is given) in original row order.
+///
+/// `ret_h(t) = exit(t + entry_lag + h) / entry(t + entry_lag) - 1`, with bar
+/// offsets taken on the panel-wide date grid (union of panel dates, or the
+/// explicit `calendar` restricted to the panel range). `tradable_entry` is the
+/// tradable flag observed on the entry day (t + entry_lag), aligned back to the
+/// signal day; missing rows and null flags count as not tradable.
+#[pyfunction(name = "with_labels", signature = (
+    df,
+    symbol_col,
+    time_col,
+    horizons,
+    entry_lag = 1,
+    entry_col = "close",
+    exit_col = "close",
+    tradable_col = None,
+    calendar = None
+))]
+#[allow(clippy::too_many_arguments)]
+fn with_labels_py(
+    py: Python<'_>,
+    df: PyDataFrame,
+    symbol_col: &str,
+    time_col: &str,
+    horizons: Vec<usize>,
+    entry_lag: usize,
+    entry_col: &str,
+    exit_col: &str,
+    tradable_col: Option<&str>,
+    calendar: Option<PySeries>,
+) -> PyResult<PyDataFrame> {
+    let options = PanelOptions {
+        symbol_col: symbol_col.to_string(),
+        time_col: time_col.to_string(),
+    };
+    let label_options = LabelOptions {
+        horizons,
+        entry_lag,
+        entry_col: entry_col.to_string(),
+        exit_col: exit_col.to_string(),
+        tradable_col: tradable_col.map(str::to_owned),
+    };
+    let calendar: Option<Series> = calendar.map(|series| series.into());
+
+    let out = py
+        .detach(move || with_labels_core(df.into(), &options, &label_options, calendar.as_ref()))
+        .map_err(eval_to_py_err)?;
+    if !out.missing_days.is_empty() {
+        warn_missing_days(py, &out.missing_days)?;
+    }
+    Ok(PyDataFrame(out.df))
+}
+
+fn warn_missing_days(py: Python<'_>, missing_days: &[String]) -> PyResult<()> {
+    const PREVIEW: usize = 20;
+    let preview = missing_days
+        .iter()
+        .take(PREVIEW)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ellipsis = if missing_days.len() > PREVIEW {
+        ", ..."
+    } else {
+        ""
+    };
+    let message = format!(
+        "with_labels: {} calendar day(s) inside the panel range have no panel rows \
+         (labels crossing them are NaN): {preview}{ellipsis}",
+        missing_days.len(),
+    );
+    let category = py.get_type::<PyUserWarning>();
+    PyErr::warn(py, &category, &std::ffi::CString::new(message)?, 2)
+}
+
 #[pyfunction(name = "worldquant_alpha101", signature = (input_alias, alphas = None))]
 fn worldquant_alpha101_py(
     input_alias: HashMap<String, String>,
@@ -173,11 +251,16 @@ fn qfactors(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(roundtrip, module)?)?;
     module.add_function(wrap_pyfunction!(compute_alphas_py, module)?)?;
     module.add_function(wrap_pyfunction!(with_alphas_py, module)?)?;
+    module.add_function(wrap_pyfunction!(with_labels_py, module)?)?;
     module.add_function(wrap_pyfunction!(worldquant_alpha101_py, module)?)?;
     module.add_function(wrap_pyfunction!(qlib_alpha158_py, module)?)?;
     Ok(())
 }
 
 fn to_py_err(err: QFactorsError) -> PyErr {
+    PyValueError::new_err(err.to_string())
+}
+
+fn eval_to_py_err(err: EvalError) -> PyErr {
     PyValueError::new_err(err.to_string())
 }

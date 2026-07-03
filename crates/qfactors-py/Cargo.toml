@@ -26,6 +26,7 @@ polars.workspace = true
 pyo3 = { workspace = true, features = ["abi3-py310"] }
 pyo3-polars.workspace = true
 qfactors-core = { path = "../qfactors-core" }
+qfactors-eval = { path = "../qfactors-eval" }
 qfactors-factors = { path = "../qfactors-factors" }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]

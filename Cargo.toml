@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/qfactors-core",
+    "crates/qfactors-eval",
     "crates/qfactors-factors",
     "crates/qfactors-py",
 ]

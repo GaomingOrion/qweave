@@ -66,6 +66,19 @@ def with_alphas(
 ) -> pl.DataFrame: ...
 
 
+def with_labels(
+    df: pl.DataFrame,
+    symbol_col: str,
+    time_col: str,
+    horizons: Sequence[int],
+    entry_lag: int = 1,
+    entry_col: str = "close",
+    exit_col: str = "close",
+    tradable_col: str | None = None,
+    calendar: pl.Series | None = None,
+) -> pl.DataFrame: ...
+
+
 def col(name: str) -> PyExpr: ...
 def lit(value: float) -> PyExpr: ...
 def min(lhs: PyExpr, rhs: PyExpr) -> PyExpr: ...
