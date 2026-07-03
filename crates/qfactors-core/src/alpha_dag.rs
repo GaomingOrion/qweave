@@ -1050,6 +1050,32 @@ fn is_elementwise(node: &Node) -> bool {
 /// Evaluate a fused elementwise node: read each leaf in the shared layout, then
 /// run the RPN once per cell over a small reused stack. Parallel across cell
 /// chunks so a lone heavy fused node still uses every core (like the kernels).
+/// Peak value-stack depth an RPN `program` reaches — the number of chunk-wide
+/// registers the columnar interpreter must hold. The peak is always hit right
+/// after a push, so recording the running depth after every op suffices.
+fn program_max_depth(program: &[EwOp]) -> usize {
+    let mut depth = 0usize;
+    let mut max = 0usize;
+    for op in program {
+        match op {
+            EwOp::Leaf(_) | EwOp::Const(_) => depth += 1,
+            EwOp::Neg | EwOp::Abs | EwOp::Log | EwOp::Sign => {}
+            EwOp::Add
+            | EwOp::Sub
+            | EwOp::Mul
+            | EwOp::Div
+            | EwOp::SignedPower
+            | EwOp::Power
+            | EwOp::Min
+            | EwOp::Max
+            | EwOp::Cmp(_) => depth -= 1,
+            EwOp::Where => depth -= 2,
+        }
+        max = max.max(depth);
+    }
+    max
+}
+
 fn eval_fused_ew(
     leaves: &[NodeId],
     program: &[EwOp],
@@ -1061,86 +1087,81 @@ fn eval_fused_ew(
         .iter()
         .map(|leaf| cells_for(slot_value(slots, *leaf), layout, cs))
         .collect();
+    let max_depth = program_max_depth(program);
     let mut out = vec![0.0f64; cs.n_cells];
-    out.par_chunks_mut(FUSED_EW_CHUNK)
+    // Columnar interpreter: rather than replaying the whole program per cell, run
+    // one op across a full chunk at a time so the inner cell loops auto-vectorize.
+    // `regs` is a stack of `max_depth` chunk-wide registers laid out end to end;
+    // register `r` occupies `regs[r*W .. (r+1)*W]`. Each lane sees the same op
+    // sequence on the same operands as the scalar version, so it is bit-exact.
+    const W: usize = FUSED_EW_CHUNK;
+    out.par_chunks_mut(W)
         .enumerate()
         .for_each(|(chunk, out_chunk)| {
-            let base = chunk * FUSED_EW_CHUNK;
-            let mut stack: Vec<f64> = Vec::with_capacity(program.len());
-            for (offset, out_cell) in out_chunk.iter_mut().enumerate() {
-                let cell = base + offset;
-                stack.clear();
-                for op in program {
-                    match op {
-                        EwOp::Leaf(j) => stack.push(leaf_cells[*j as usize][cell]),
-                        EwOp::Const(bits) => stack.push(f64::from_bits(*bits)),
-                        EwOp::Add => {
-                            let b = stack.pop().unwrap();
-                            *stack.last_mut().unwrap() += b;
-                        }
-                        EwOp::Sub => {
-                            let b = stack.pop().unwrap();
-                            *stack.last_mut().unwrap() -= b;
-                        }
-                        EwOp::Mul => {
-                            let b = stack.pop().unwrap();
-                            *stack.last_mut().unwrap() *= b;
-                        }
-                        EwOp::Div => {
-                            let b = stack.pop().unwrap();
-                            *stack.last_mut().unwrap() /= b;
-                        }
-                        EwOp::Neg => {
-                            let a = stack.last_mut().unwrap();
-                            *a = -*a;
-                        }
-                        EwOp::Abs => {
-                            let a = stack.last_mut().unwrap();
-                            *a = a.abs();
-                        }
-                        EwOp::Log => {
-                            let a = stack.last_mut().unwrap();
-                            *a = log_value(*a);
-                        }
-                        EwOp::Sign => {
-                            let a = stack.last_mut().unwrap();
-                            *a = sign(*a);
-                        }
-                        EwOp::SignedPower => {
-                            let b = stack.pop().unwrap();
-                            let a = stack.last_mut().unwrap();
-                            *a = signed_power(*a, b);
-                        }
-                        EwOp::Power => {
-                            let b = stack.pop().unwrap();
-                            let a = stack.last_mut().unwrap();
-                            *a = a.powf(b);
-                        }
-                        EwOp::Min => {
-                            let b = stack.pop().unwrap();
-                            let a = stack.last_mut().unwrap();
-                            *a = min_value(*a, b);
-                        }
-                        EwOp::Max => {
-                            let b = stack.pop().unwrap();
-                            let a = stack.last_mut().unwrap();
-                            *a = max_value(*a, b);
-                        }
-                        EwOp::Cmp(op) => {
-                            let b = stack.pop().unwrap();
-                            let a = stack.last_mut().unwrap();
-                            *a = cmp_value(*op, *a, b);
-                        }
-                        EwOp::Where => {
-                            let when_false = stack.pop().unwrap();
-                            let when_true = stack.pop().unwrap();
-                            let cond = stack.last_mut().unwrap();
-                            *cond = where_value(*cond, when_true, when_false);
+            let base = chunk * W;
+            let len = out_chunk.len();
+            let mut regs = vec![0.0f64; max_depth * W];
+            let mut sp = 0usize;
+
+            macro_rules! unary {
+                ($f:expr) => {{
+                    for x in &mut regs[(sp - 1) * W..(sp - 1) * W + len] {
+                        *x = $f(*x);
+                    }
+                }};
+            }
+            macro_rules! binary {
+                ($f:expr) => {{
+                    sp -= 1;
+                    let (left, right) = regs.split_at_mut(sp * W);
+                    let a = &mut left[(sp - 1) * W..(sp - 1) * W + len];
+                    let b = &right[..len];
+                    for i in 0..len {
+                        a[i] = $f(a[i], b[i]);
+                    }
+                }};
+            }
+
+            for op in program {
+                match op {
+                    EwOp::Leaf(j) => {
+                        regs[sp * W..sp * W + len]
+                            .copy_from_slice(&leaf_cells[*j as usize][base..base + len]);
+                        sp += 1;
+                    }
+                    EwOp::Const(bits) => {
+                        regs[sp * W..sp * W + len].fill(f64::from_bits(*bits));
+                        sp += 1;
+                    }
+                    EwOp::Add => binary!(|a, b| a + b),
+                    EwOp::Sub => binary!(|a, b| a - b),
+                    EwOp::Mul => binary!(|a, b| a * b),
+                    EwOp::Div => binary!(|a, b| a / b),
+                    EwOp::Neg => unary!(|a: f64| -a),
+                    EwOp::Abs => unary!(f64::abs),
+                    EwOp::Log => unary!(log_value),
+                    EwOp::Sign => unary!(sign),
+                    EwOp::SignedPower => binary!(signed_power),
+                    EwOp::Power => binary!(|a: f64, b| a.powf(b)),
+                    EwOp::Min => binary!(min_value),
+                    EwOp::Max => binary!(max_value),
+                    EwOp::Cmp(cmp) => {
+                        let cmp = *cmp;
+                        binary!(move |a, b| cmp_value(cmp, a, b));
+                    }
+                    EwOp::Where => {
+                        sp -= 2;
+                        let (left, right) = regs.split_at_mut(sp * W);
+                        let cond = &mut left[(sp - 1) * W..(sp - 1) * W + len];
+                        let when_true = &right[..len];
+                        let when_false = &right[W..W + len];
+                        for i in 0..len {
+                            cond[i] = where_value(cond[i], when_true[i], when_false[i]);
                         }
                     }
                 }
-                *out_cell = stack.pop().unwrap();
             }
+            out_chunk.copy_from_slice(&regs[..len]);
         });
     DagVal::Cells {
         values: Arc::new(out),
@@ -1447,6 +1468,11 @@ mod tests {
         for (idx, (actual, expected)) in actual.iter().zip(expected).enumerate() {
             if expected.is_nan() {
                 assert!(actual.is_nan(), "idx {idx}: actual {actual}, expected NaN");
+            } else if expected.is_infinite() {
+                assert_eq!(
+                    actual, expected,
+                    "idx {idx}: actual {actual}, expected {expected}"
+                );
             } else {
                 assert!(
                     (actual - expected).abs() < 1e-12,
@@ -1553,6 +1579,63 @@ mod tests {
                         Box::new(Expr::Field("close".to_string())),
                         3,
                         0.8,
+                    )),
+                )),
+            )),
+        );
+
+        let actual = eval_dag(&expr, &cs)?;
+        let expected = eval_tree(&expr, &cs)?;
+
+        assert_vec_close(&actual, &expected);
+        Ok(())
+    }
+
+    #[test]
+    fn dag_eval_matches_tree_for_deep_elementwise_chain() -> Result<()> {
+        // Ten single-use fields collapse into one deep FusedEw program that
+        // exercises every EwOp (both binary and unary), a ternary Where, and a
+        // register depth > 2 — so the columnar interpreter's register stack,
+        // split-borrow, and Where's two-pop unwind all run. The panel mixes
+        // negatives and zeros so Log/SignedPower/Sign/Div produce NaN/inf lanes.
+        let cs = test_cellset_fields(
+            HashMap::from([
+                ("a".to_string(), vec![2.0, -3.0, 0.0, 4.0, -1.0, 5.0]),
+                ("b".to_string(), vec![1.0, 3.0, -2.0, 4.0, 1.0, -5.0]),
+                ("c".to_string(), vec![2.0, 0.0, 3.0, -1.0, 2.0, 4.0]),
+                ("d".to_string(), vec![-1.0, 2.0, 0.0, 3.0, -4.0, 1.0]),
+                ("e".to_string(), vec![0.0, 1.0, 2.0, -3.0, 4.0, -5.0]),
+                ("f".to_string(), vec![3.0, -2.0, 1.0, 0.0, 2.0, -1.0]),
+                ("g".to_string(), vec![1.0, 1.0, -1.0, 2.0, -2.0, 3.0]),
+                ("h".to_string(), vec![4.0, -4.0, 2.0, -2.0, 0.0, 1.0]),
+                ("i".to_string(), vec![-3.0, 3.0, 1.0, -1.0, 5.0, 0.0]),
+                ("j".to_string(), vec![2.0, 2.0, -2.0, 0.0, 3.0, -3.0]),
+            ]),
+            vec![0..3, 3..6],
+            vec![0..2, 2..4, 4..6],
+            vec![0, 3, 1, 4, 2, 5],
+        );
+        let field = |name: &str| Box::new(Expr::Field(name.to_string()));
+        let expr = Expr::Add(
+            Box::new(Expr::Div(
+                Box::new(Expr::Log(Box::new(Expr::Abs(Box::new(Expr::Sub(
+                    field("a"),
+                    field("b"),
+                )))))),
+                field("c"),
+            )),
+            Box::new(Expr::Where(
+                Box::new(Expr::Cmp(
+                    CmpOp::Gt,
+                    Box::new(Expr::Sign(field("d"))),
+                    field("e"),
+                )),
+                Box::new(Expr::SignedPower(field("f"), Box::new(Expr::Const(0.5)))),
+                Box::new(Expr::Max(
+                    Box::new(Expr::Neg(Box::new(Expr::Mul(field("g"), field("h"))))),
+                    Box::new(Expr::Min(
+                        field("i"),
+                        Box::new(Expr::Power(field("j"), Box::new(Expr::Const(2.0)))),
                     )),
                 )),
             )),
