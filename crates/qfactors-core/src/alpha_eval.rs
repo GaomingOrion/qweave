@@ -797,7 +797,7 @@ fn xs_per_group(
                 .push((tn_idx, value));
         }
 
-        buckets.into_values().flat_map(|bucket| f(bucket)).collect()
+        buckets.into_values().flat_map(&f).collect()
     })
 }
 
@@ -1809,7 +1809,12 @@ mod tests {
 
     /// Brute-force ts_argmin/argmax over one block: 0-based offset of the
     /// earliest extremum in each fully non-NaN window, NaN elsewhere.
-    fn reference_arg(values: &[f64], days: usize, blocks: &[Range<usize>], want_max: bool) -> Vec<f64> {
+    fn reference_arg(
+        values: &[f64],
+        days: usize,
+        blocks: &[Range<usize>],
+        want_max: bool,
+    ) -> Vec<f64> {
         let mut out = vec![f64::NAN; values.len()];
         for block in blocks {
             for local_idx in 0..block.len() {
@@ -1848,8 +1853,16 @@ mod tests {
             state
         };
         let palette = [
-            0.0, -0.0, 1.0, 1.0, 2.0, 2.0, -3.0,
-            f64::INFINITY, f64::NEG_INFINITY, f64::NAN,
+            0.0,
+            -0.0,
+            1.0,
+            1.0,
+            2.0,
+            2.0,
+            -3.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
         ];
         for _ in 0..100 {
             let len = 1 + (next() % 40) as usize;

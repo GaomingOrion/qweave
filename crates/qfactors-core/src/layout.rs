@@ -78,6 +78,7 @@ mod tests {
 
     /// A CellSet carrying only the fields `tn_to_nt` reads (`n_cells`,
     /// `tn_order`); the rest are sized placeholders.
+    #[allow(clippy::single_range_in_vec_init)]
     fn cs_with_order(order: Vec<usize>) -> CellSet {
         let n = order.len();
         CellSet {
