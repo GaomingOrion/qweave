@@ -907,26 +907,39 @@ pub(crate) fn quantile(values: &[f64], days: usize, q: f64, cs: &CellSet) -> Vec
     }
 
     par_fill_blocks(values.len(), &cs.sym_blocks, |block, out_block| {
-        let mut scratch = Vec::with_capacity(days);
+        // Incremental order-statistic window: `sorted` keeps the current window's
+        // non-NaN values in ascending order. Each step evicts the outgoing value
+        // and inserts the incoming one via binary search (O(days) memmove), so the
+        // quantile itself is a plain indexed lookup. NaNs never enter `sorted`;
+        // they are tracked by `nan_count` and gate the output exactly as in
+        // `ts_window`. Evicting before inserting caps `sorted` at `days` entries.
+        let mut sorted: Vec<f64> = Vec::with_capacity(days);
         let mut nan_count = 0usize;
         for (local_idx, out_cell) in out_block.iter_mut().enumerate() {
-            let idx = block.start + local_idx;
-            if values[idx].is_nan() {
-                nan_count += 1;
-            }
-
             if local_idx >= days {
-                let old_idx = block.start + local_idx - days;
-                if values[old_idx].is_nan() {
+                let old = values[block.start + local_idx - days];
+                if old.is_nan() {
                     nan_count -= 1;
+                } else {
+                    let pos = sorted
+                        .binary_search_by(|probe| {
+                            probe.partial_cmp(&old).unwrap_or(Ordering::Equal)
+                        })
+                        .expect("evicted value is present in the window");
+                    sorted.remove(pos);
                 }
             }
 
+            let new = values[block.start + local_idx];
+            if new.is_nan() {
+                nan_count += 1;
+            } else {
+                let pos = sorted.partition_point(|&probe| probe < new);
+                sorted.insert(pos, new);
+            }
+
             if local_idx + 1 >= days && nan_count == 0 {
-                let start = block.start + local_idx + 1 - days;
-                scratch.clear();
-                scratch.extend_from_slice(&values[start..=idx]);
-                *out_cell = quantile_scratch(&mut scratch, q);
+                *out_cell = quantile_sorted(&sorted, q);
             }
         }
     })
@@ -1174,31 +1187,18 @@ fn resi_window(window: &[f64]) -> f64 {
     window[window.len() - 1] - y_mean - slope * (n - 1.0 - x_mean)
 }
 
-fn quantile_scratch(values: &mut [f64], q: f64) -> f64 {
-    if !(0.0..=1.0).contains(&q) {
-        return f64::NAN;
-    }
-    if values.is_empty() {
-        return f64::NAN;
-    }
-
-    let pos = q * (values.len() - 1) as f64;
+/// Linear-interpolated quantile of an ascending, NaN-free slice. Callers gate
+/// `q` to `[0, 1]` and pass a non-empty window, so no defensive checks are needed
+/// here; the arithmetic is identical to a full-sort quantile, hence bit-exact.
+fn quantile_sorted(sorted: &[f64], q: f64) -> f64 {
+    let pos = q * (sorted.len() - 1) as f64;
     let lo = pos.floor() as usize;
     let hi = pos.ceil() as usize;
-    let (_, lo_value, suffix) = values.select_nth_unstable_by(lo, |lhs, rhs| {
-        lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal)
-    });
-    let lo_value = *lo_value;
     if lo == hi {
-        lo_value
+        sorted[lo]
     } else {
         let frac = pos - lo as f64;
-        let hi_value = suffix
-            .iter()
-            .copied()
-            .min_by(|lhs, rhs| lhs.partial_cmp(rhs).unwrap_or(Ordering::Equal))
-            .expect("non-integer quantile has a successor");
-        lo_value + frac * (hi_value - lo_value)
+        sorted[lo] + frac * (sorted[hi] - sorted[lo])
     }
 }
 
@@ -1702,6 +1702,63 @@ mod tests {
                     &quantile(&values, days, q, &cs),
                     &reference_quantile(&values, days, q, &blocks),
                 );
+            }
+        }
+    }
+
+    /// Differential fuzz: the incremental sorted window must agree bit-for-bit
+    /// with the full-sort reference across many random panels. The palette stuffs
+    /// in ties, signed zeros, and infinities to exercise binary insert/remove, and
+    /// NaNs to exercise the gate that keeps them out of the sorted structure while
+    /// the window still slides over them.
+    #[test]
+    fn quantile_incremental_matches_full_sort_reference() {
+        let mut state = 0x9E3779B97F4A7C15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let palette = [
+            0.0,
+            -0.0,
+            1.0,
+            1.0,
+            2.0,
+            -3.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+
+        for _ in 0..100 {
+            let len = 1 + (next() % 40) as usize;
+            let values: Vec<f64> = (0..len)
+                .map(|_| palette[(next() % palette.len() as u64) as usize])
+                .collect();
+
+            let mut blocks = Vec::new();
+            let mut start = 0;
+            while start < len {
+                let size = 1 + (next() % (len - start) as u64) as usize;
+                blocks.push(start..start + size);
+                start += size;
+            }
+
+            let cs = test_cellset(
+                values.clone(),
+                blocks.clone(),
+                (0..len).map(|idx| idx..idx + 1).collect(),
+            );
+
+            for days in 1..=6 {
+                for q in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+                    assert_vec_same_numeric(
+                        &quantile(&values, days, q, &cs),
+                        &reference_quantile(&values, days, q, &blocks),
+                    );
+                }
             }
         }
     }
