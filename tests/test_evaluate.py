@@ -612,3 +612,37 @@ def test_factor_source_matches_in_frame(tmp_path):
             min_cs_count=4,
             factor_source=str(alpha_out),
         )
+
+
+def test_to_html_report(tmp_path):
+    from datetime import date, timedelta
+
+    start = date(2026, 1, 1)
+    rows = []
+    rng = np.random.default_rng(83)
+    for a in range(6):
+        for t in range(40):
+            rows.append({
+                "asset": f"S{a}", "time": start + timedelta(days=t),
+                "f1": float(rng.normal()), "f2": float(rng.normal()),
+                "ret_1": float(rng.normal() * 0.02),
+            })
+    df = pl.DataFrame(rows)
+    result = run_evaluate(df, ["f1", "f2"], quantiles=4, min_cs_count=4)
+
+    path = tmp_path / "report.html"
+    result.to_html(str(path))
+    html = path.read_text()
+
+    assert html.lstrip().lower().startswith("<!doctype html>")
+    assert '"f1"' in html and '"f2"' in html
+    # Self-contained: no external script/style/link fetches.
+    assert 'src="http' not in html and "<link" not in html and "cdn" not in html
+    # Monthly detail present because the time column is a date.
+    assert '"monthly"' in html
+
+    # Streamed results have no in-memory tables to render.
+    streamed = run_evaluate(df, ["f1"], quantiles=4, min_cs_count=4,
+                            output_dir=str(tmp_path / "run"))
+    with pytest.raises(ValueError):
+        streamed.to_html(str(tmp_path / "x.html"))

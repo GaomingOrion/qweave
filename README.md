@@ -60,9 +60,10 @@ stable — a frozen golden baseline guards every change at `1e-8` tolerance.
 **Planned**
 
 - Node-level parallelism and fewer layout transposes in the evaluator.
-- Factor evaluation suite (`with_labels` / `evaluate` / `factor_correlation`) —
-  landed as experimental; promotion pending a frozen golden fixture, a browser
-  dashboard, and parquet factor-source streaming for thousand-factor runs.
+- Factor evaluation suite (`with_labels` / `evaluate` / `factor_correlation`,
+  with parquet factor-source streaming and a self-contained
+  `EvalResult.to_html()` report) — landed as experimental; promotion pending a
+  frozen golden fixture.
 - Publish to PyPI and crates.io.
 - Expanded factor / alpha API documentation.
 
@@ -141,8 +142,8 @@ Python functions:
 - `qfactors.worldquant_alpha101(input_alias, alphas=None)`
 - `qfactors.qlib_alpha158(input_alias, alphas=None)`
 - `qfactors.with_labels(...)`, `qfactors.evaluate(...)`,
-  `qfactors.factor_correlation(...)` (experimental — see
-  [docs/factor_evaluation.md](docs/factor_evaluation.md))
+  `qfactors.factor_correlation(...)`, and `EvalResult.to_html(...)`
+  (experimental — see [docs/factor_evaluation.md](docs/factor_evaluation.md))
 
 Input rules:
 

@@ -4,7 +4,7 @@ use pyo3_polars::PyDataFrame;
 use qfactors_core::PanelOptions;
 use qfactors_eval::{
     Binning, Demean, EvalOutput, EvaluateOptions, TableData, Weighting, evaluate as evaluate_core,
-    factor_correlation as factor_correlation_core, save_output,
+    factor_correlation as factor_correlation_core, save_output, to_html as to_html_core,
 };
 
 /// Result object for `evaluate`: Polars tables plus the parameter snapshot.
@@ -84,6 +84,15 @@ impl PyEvalResult {
     /// results already live in their output_dir).
     fn save(&self, py: Python<'_>, dir: &str) -> PyResult<()> {
         py.detach(|| save_output(&self.output, dir))
+            .map_err(|err| PyValueError::new_err(err.to_string()))
+    }
+
+    /// Write a self-contained HTML report (sortable summary table + per-factor
+    /// quantile-return and monthly-IC charts) to `path`. Memory mode only;
+    /// `max_detail_factors` caps the drill-down bundle to bound file size.
+    #[pyo3(signature = (path, max_detail_factors = 200))]
+    fn to_html(&self, py: Python<'_>, path: &str, max_detail_factors: usize) -> PyResult<()> {
+        py.detach(|| to_html_core(&self.output, path, max_detail_factors))
             .map_err(|err| PyValueError::new_err(err.to_string()))
     }
 

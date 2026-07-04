@@ -209,6 +209,22 @@ memory for thousand-factor runs — the dominant cost is `quantile_returns`
 (T×F×Q rows). `save()` writes the same contract to a directory (one parquet per
 table plus `meta.json`) and is memory-mode only.
 
+For thousand-factor runs the wide *input* frame is itself the memory ceiling.
+Pass `factor_source=<parquet>` (e.g. a `compute_alphas(output_path=...)` panel
+covering the same `(symbol, time)` panel) to read factor columns from disk in
+batches instead of from `df`; only the label / tradable / group columns need to
+be materialized.
+
+### HTML report
+
+`result.to_html(path, max_detail_factors=200)` writes a single self-contained
+HTML file — a sortable, filterable multi-factor summary table plus a per-factor
+drill-down (mean return by quantile across horizons, monthly IC) drawn with
+inline SVG. No external assets, no server; it opens straight from disk. Memory
+mode only; the drill-down bundle is capped at `max_detail_factors` factors (the
+summary table always covers every factor) to bound file size, so sort/filter the
+result to the shortlist you care about first.
+
 ## `factor_correlation`
 
 ```python
