@@ -28,6 +28,7 @@ pyo3-polars.workspace = true
 qfactors-core = { path = "../qfactors-core" }
 qfactors-eval = { path = "../qfactors-eval" }
 qfactors-factors = { path = "../qfactors-factors" }
+qfactors-server = { path = "../qfactors-server" }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 # `disable_initial_exec_tls` makes jemalloc use the global-dynamic TLS model so

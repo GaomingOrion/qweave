@@ -227,35 +227,34 @@ result to the shortlist you care about first.
 
 ### Interactive report (Vue + Axum + ECharts)
 
-For a richer, interactive view, `qfactors-server` serves a saved output dir as a
-JSON API and a Vue single-page app that draws the tearsheets with ECharts
-(tooltips, zoom, legend toggles). v1 covers the Returns tab (mean return by
-quantile, cumulative return by quantile, long-short cumulative net-value with
-drawdown, top−bottom spread) and the IC tab (daily IC/RankIC with a rolling mean,
-IC distribution, monthly IC heatmap).
-
-Build the frontend once, then point the server at any `save()`/`output_dir`:
-
-```powershell
-# one-time: build the SPA (requires Node/npm)
-cd frontend; npm install; npm run build; cd ..
-
-# serve a saved output dir
-cargo run -p qfactors-server -- --dir <output_dir> --assets frontend/dist --open
-```
-
-Or drive it from Python — `serve()` saves an in-memory result to a temp dir and
-launches the same server (build the binary first with
-`cargo build -p qfactors-server`; set `QFACTORS_SERVER_ASSETS=frontend/dist` to
-serve the UI):
+For a richer, interactive view, `result.view()` opens a browser report with a
+sortable summary table and per-factor tearsheets drawn with ECharts (tooltips,
+zoom, legend toggles). The Returns tab shows mean return by quantile, cumulative
+return by quantile, the long-short cumulative net-value with drawdown, and the
+top−bottom spread; the IC tab shows daily IC/RankIC with a rolling mean, the IC
+distribution, and the monthly IC heatmap.
 
 ```python
 result = qf.evaluate(df, "symbol", "date", factor_cols)
-result.serve(port=8080)  # Ctrl-C to stop
+result.view()  # opens the browser; blocks until Ctrl-C
 ```
 
-The server is read-only and reads parquet eagerly per factor; use it on a
-filtered shortlist rather than a thousand-factor run.
+The server (`qfactors-server`) and the compiled frontend are embedded in the
+extension module — `view()` needs no ports, paths, or external binary. It is
+read-only and filters the in-memory tables per factor, so use it on a filtered
+shortlist rather than a thousand-factor run. `view()` is memory-mode only; for a
+streamed `output_dir`, `save(dir)` then serve it from the CLI:
+
+```powershell
+cargo run -p qfactors-server -- --dir <output_dir> --open
+```
+
+Building the Python wheel embeds the frontend, so build the SPA first (one-time,
+requires Node/npm):
+
+```powershell
+cd frontend; npm install; npm run build; cd ..
+```
 
 ## `factor_correlation`
 

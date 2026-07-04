@@ -1,6 +1,4 @@
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
+use polars::prelude::DataFrame;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
@@ -9,6 +7,7 @@ use qfactors_eval::{
     Binning, Demean, EvalOutput, EvaluateOptions, TableData, Weighting, evaluate as evaluate_core,
     factor_correlation as factor_correlation_core, save_output, to_html as to_html_core,
 };
+use qfactors_server::{ReportData, run_server};
 
 /// Result object for `evaluate`: Polars tables plus the parameter snapshot.
 ///
@@ -99,23 +98,15 @@ impl PyEvalResult {
             .map_err(|err| PyValueError::new_err(err.to_string()))
     }
 
-    /// Launch the interactive report server on this result and block until
-    /// interrupted (Ctrl-C). Memory-mode results are saved to a temporary dir
-    /// first; streamed results serve their existing `output_dir` in place.
-    ///
-    /// Requires the `qfactors-server` binary (build it with
-    /// `cargo build -p qfactors-server`). It is located via the
-    /// `QFACTORS_SERVER_BIN` env var, then `target/{release,debug}` under the
-    /// current dir, then `qfactors-server` on `PATH`. Set `QFACTORS_SERVER_ASSETS`
-    /// to the built `frontend/dist` to serve the UI (otherwise API only).
-    #[pyo3(signature = (port = 8080, open_browser = true))]
-    fn serve(&self, py: Python<'_>, port: u16, open_browser: bool) -> PyResult<()> {
-        let (dir, temp) = self.data_dir()?;
-        let result = py.detach(|| run_server(&dir, port, open_browser));
-        if let Some(temp) = temp {
-            std::fs::remove_dir_all(&temp).ok();
-        }
-        result.map_err(PyValueError::new_err)
+    /// Open an interactive report (summary table + per-factor Returns/IC
+    /// tearsheets) in the default browser and block until the server is stopped
+    /// (Ctrl-C). The server and UI are embedded — no external files needed.
+    /// Memory mode only (call `save()` then `qfactors-server --dir <dir>` for a
+    /// streamed result).
+    fn view(&self, py: Python<'_>) -> PyResult<()> {
+        let data = report_data(&self.output)?;
+        py.detach(|| run_server(data, 0, true, None))
+            .map_err(|err| PyValueError::new_err(err.to_string()))
     }
 
     fn __repr__(&self) -> String {
@@ -130,76 +121,27 @@ impl PyEvalResult {
     }
 }
 
-impl PyEvalResult {
-    /// Resolve the parquet directory to serve. Returns the dir and, for
-    /// memory-mode results, the temp dir to clean up afterwards.
-    fn data_dir(&self) -> PyResult<(PathBuf, Option<PathBuf>)> {
-        match &self.output.ic {
-            TableData::File(path) => {
-                let dir = Path::new(path)
-                    .parent()
-                    .ok_or_else(|| PyValueError::new_err("streamed table has no parent dir"))?;
-                Ok((dir.to_path_buf(), None))
-            }
-            TableData::Memory(_) => {
-                let dir = std::env::temp_dir().join(format!(
-                    "qfactors-report-{}-{}",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos())
-                        .unwrap_or(0)
-                ));
-                let dir_str = dir.to_string_lossy().into_owned();
-                save_output(&self.output, &dir_str)
-                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
-                Ok((dir.clone(), Some(dir)))
-            }
+/// Assemble the in-memory report tables for the server. Memory mode only; a
+/// streamed result already lives on disk and should be served with the CLI.
+fn report_data(output: &EvalOutput) -> PyResult<ReportData> {
+    let df = |table: &TableData| -> PyResult<DataFrame> {
+        match table {
+            TableData::Memory(df) => Ok(df.clone()),
+            TableData::File(_) => Err(PyValueError::new_err(
+                "view() requires an in-memory result; call save(dir) then \
+                 run `qfactors-server --dir <dir>` for a streamed result",
+            )),
         }
-    }
-}
-
-/// Locate the server binary and run it against `dir`, blocking until it exits.
-fn run_server(dir: &Path, port: u16, open_browser: bool) -> Result<(), String> {
-    let bin = locate_server_bin()
-        .ok_or_else(|| "qfactors-server binary not found; build it with \
-             `cargo build -p qfactors-server` or set QFACTORS_SERVER_BIN"
-            .to_string())?;
-    let mut cmd = Command::new(bin);
-    cmd.arg("--dir").arg(dir).arg("--port").arg(port.to_string());
-    if let Ok(assets) = std::env::var("QFACTORS_SERVER_ASSETS") {
-        cmd.arg("--assets").arg(assets);
-    }
-    if open_browser {
-        cmd.arg("--open");
-    }
-    let status = cmd.status().map_err(|err| format!("launching qfactors-server: {err}"))?;
-    if !status.success() {
-        return Err(format!("qfactors-server exited with {status}"));
-    }
-    Ok(())
-}
-
-fn locate_server_bin() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("QFACTORS_SERVER_BIN") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    let exe = if cfg!(windows) {
-        "qfactors-server.exe"
-    } else {
-        "qfactors-server"
     };
-    for profile in ["release", "debug"] {
-        let candidate = Path::new("target").join(profile).join(exe);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    // Fall back to PATH resolution by the OS.
-    Some(PathBuf::from("qfactors-server"))
+    ReportData::new(
+        output.summary.clone(),
+        df(&output.ic)?,
+        df(&output.quantile_returns)?,
+        df(&output.portfolio)?,
+        output.ic_monthly.clone(),
+        output.meta_json.clone(),
+    )
+    .map_err(|err| PyValueError::new_err(err.to_string()))
 }
 
 fn table_to_py(py: Python<'_>, table: &TableData) -> PyResult<Py<PyAny>> {

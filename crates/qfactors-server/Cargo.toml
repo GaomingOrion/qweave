@@ -18,10 +18,11 @@ path = "src/main.rs"
 [dependencies]
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
 polars.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 
 [dev-dependencies]

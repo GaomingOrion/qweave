@@ -1,75 +1,136 @@
-//! Read-only HTTP server over a saved evaluation `output_dir`. Serves the table
-//! JSON the Vue frontend consumes and, when built, the frontend itself.
+//! Read-only HTTP server for an interactive factor-evaluation report. Serves the
+//! table JSON the Vue frontend consumes plus the frontend itself (embedded into
+//! the binary when built). Data is held in memory (see [`ReportData`]).
 
+mod assets;
 mod data;
 
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::Router;
+use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Json;
+use axum::Router;
 use serde_json::{Value, json};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
-pub use data::{DataDir, DataError};
+pub use data::{DataError, ReportData};
 
-#[derive(Clone)]
-struct AppState {
-    dir: Arc<DataDir>,
-}
+type Shared = Arc<ReportData>;
 
-/// Build the API router. When `assets` points at a built frontend (`dist`), it
-/// is served at `/` with SPA fallback; otherwise only `/api/*` is available.
-pub fn router(dir: DataDir, assets: Option<PathBuf>) -> Router {
-    let state = AppState { dir: Arc::new(dir) };
+/// Build the report router. The frontend is served from `assets_override` (a
+/// `dist` dir, for dev) when given, else from the embedded build, else an
+/// API-only placeholder.
+pub fn router(data: ReportData, assets_override: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/api/meta", get(meta))
         .route("/api/summary", get(summary))
         .route("/api/factor/{name}", get(factor))
-        .with_state(state)
+        .with_state(Arc::new(data))
         .layer(CorsLayer::permissive());
 
-    match assets.filter(|p| p.join("index.html").is_file()) {
+    match assets_override.filter(|p| p.join("index.html").is_file()) {
         Some(dist) => {
             let index = dist.join("index.html");
             let files = ServeDir::new(&dist).not_found_service(ServeFile::new(index));
             api.fallback_service(files)
         }
-        None => api.fallback(get(no_assets)),
+        None if assets::HAVE => api.fallback(embedded),
+        None => api.fallback(no_assets),
+    }
+}
+
+/// Serve `data` on `127.0.0.1:port` (port 0 picks a free port), optionally
+/// opening the browser, and block until Ctrl-C. Builds its own tokio runtime so
+/// it can be called from a plain (non-async) context, e.g. the Python binding.
+pub fn run_server(
+    data: ReportData,
+    port: u16,
+    open: bool,
+    assets_override: Option<PathBuf>,
+) -> Result<(), DataError> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async move {
+        let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let url = format!("http://{}", listener.local_addr()?);
+        println!("qfactors report: {url}  (Ctrl-C to stop)");
+        if open {
+            open_browser(&url);
+        }
+        axum::serve(listener, router(data, assets_override))
+            .with_graceful_shutdown(async {
+                tokio::signal::ctrl_c().await.ok();
+            })
+            .await
+    })?;
+    Ok(())
+}
+
+async fn meta(State(d): State<Shared>) -> Json<Value> {
+    Json(d.meta_value())
+}
+
+async fn summary(State(d): State<Shared>) -> Json<Value> {
+    Json(d.summary_records())
+}
+
+async fn factor(State(d): State<Shared>, Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(d.factor_bundle(&name)?))
+}
+
+/// Serve an embedded frontend file, falling back to `index.html` for SPA routes.
+async fn embedded(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    match assets::get(path) {
+        Some(bytes) => ([(header::CONTENT_TYPE, content_type(path))], bytes).into_response(),
+        None => (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            assets::get("index.html").unwrap_or_default(),
+        )
+            .into_response(),
     }
 }
 
 async fn no_assets() -> impl IntoResponse {
     (
         StatusCode::OK,
-        "qfactors-server: API is up at /api/*. Build the frontend \
-         (cd frontend && npm run build) or pass --assets to serve the UI.",
+        "qfactors report: API is up at /api/*. Build the frontend \
+         (cd frontend && npm run build) and rebuild to serve the UI.",
     )
 }
 
-async fn meta(State(s): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let raw = s.dir.meta_json()?;
-    let mut value: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
-    if let Value::Object(map) = &mut value {
-        map.insert("factors".into(), json!(s.dir.factors()?));
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("json") | Some("map") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        _ => "application/octet-stream",
     }
-    Ok(Json(value))
 }
 
-async fn summary(State(s): State<AppState>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(s.dir.summary_records()?))
-}
+/// Best-effort launch of the default browser; failures are non-fatal.
+fn open_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    let (cmd, args) = ("cmd", vec!["/C", "start", "", url]);
+    #[cfg(target_os = "macos")]
+    let (cmd, args) = ("open", vec![url]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let (cmd, args) = ("xdg-open", vec![url]);
 
-async fn factor(
-    State(s): State<AppState>,
-    Path(name): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    Ok(Json(s.dir.factor_bundle(&name)?))
+    let _ = std::process::Command::new(cmd).args(args).spawn();
 }
 
 /// API error → HTTP status. A missing table/factor is a 404; anything else is a
@@ -98,20 +159,19 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
+    use polars::prelude::*;
     use qfactors_core::PanelOptions;
     use qfactors_eval::{Binning, Demean, EvaluateOptions, Weighting, evaluate};
-    use polars::prelude::*;
     use tower::ServiceExt;
 
     fn fixture_dir() -> PathBuf {
-        let df = df!(
+        let mut df = df!(
             "asset" => ["A", "B", "C", "D", "A", "B", "C", "D"],
             "time" => [20481i32, 20481, 20481, 20481, 20512, 20512, 20512, 20512],
             "f1" => [1.0f64, 2.0, 3.0, 4.0, 4.0, 3.0, 2.0, 1.0],
             "ret_1" => [0.01f64, 0.02, 0.03, 0.04, 0.04, 0.03, 0.02, 0.01],
         )
         .unwrap();
-        let mut df = df;
         let time = df.column("time").unwrap().cast(&DataType::Date).unwrap();
         df.with_column(time).unwrap();
 
@@ -153,7 +213,7 @@ mod tests {
     #[tokio::test]
     async fn serves_meta_summary_and_factor() {
         let dir = fixture_dir();
-        let app = router(DataDir::new(&dir).unwrap(), None);
+        let app = router(ReportData::from_dir(&dir).unwrap(), None);
 
         let (status, meta) = get_json(&app, "/api/meta").await;
         assert_eq!(status, StatusCode::OK);
@@ -167,7 +227,6 @@ mod tests {
         let (status, bundle) = get_json(&app, "/api/factor/f1").await;
         assert_eq!(status, StatusCode::OK);
         assert!(bundle["ic"]["ic"].as_array().unwrap().len() >= 2);
-        // Date column reached JSON as an ISO string, not an integer.
         assert!(bundle["ic"]["date"][0].as_str().unwrap().contains('-'));
         assert!(bundle["quantiles"]["mean_ret_1"].is_array());
         assert!(bundle["monthly"].is_object());

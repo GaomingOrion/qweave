@@ -1,18 +1,24 @@
-//! Read a saved evaluation `output_dir` (one parquet per table + `meta.json`)
-//! and shape it into JSON for the API. Reads are eager (matching the crate's
-//! existing `ParquetReader` usage) and filtered per factor in memory — the
-//! interactive report targets a shortlist, not thousand-factor runs.
+//! In-memory report tables and their JSON shaping. The data is held as polars
+//! DataFrames (passed in from an evaluation result, or read once from a saved
+//! `output_dir`) and filtered per factor in memory — the interactive report
+//! targets a shortlist, not thousand-factor runs.
 
 use std::collections::HashSet;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::Path;
 
 use polars::prelude::*;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
-/// A directory produced by `evaluate(output_dir=...)` / `EvalResult.save()`.
-pub struct DataDir {
-    root: PathBuf,
+/// Everything the report API serves, already in memory.
+pub struct ReportData {
+    summary: DataFrame,
+    ic: DataFrame,
+    quantiles: DataFrame,
+    portfolio: DataFrame,
+    monthly: Option<DataFrame>,
+    meta_json: String,
+    factors: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -47,92 +53,123 @@ impl From<std::io::Error> for DataError {
 
 type Result<T> = std::result::Result<T, DataError>;
 
-impl DataDir {
-    pub fn new(root: impl Into<PathBuf>) -> Result<Self> {
-        let root = root.into();
-        if !root.join("summary.parquet").is_file() {
+impl ReportData {
+    /// Build from the five evaluation tables plus the `meta.json` snapshot. Date
+    /// columns are cast to ISO strings once here so per-factor requests are cheap.
+    pub fn new(
+        summary: DataFrame,
+        ic: DataFrame,
+        quantiles: DataFrame,
+        portfolio: DataFrame,
+        monthly: Option<DataFrame>,
+        meta_json: String,
+    ) -> Result<Self> {
+        let factors = distinct_factors(&summary)?;
+        Ok(Self {
+            summary,
+            ic: stringify_dates(ic)?,
+            quantiles: stringify_dates(quantiles)?,
+            portfolio: stringify_dates(portfolio)?,
+            monthly,
+            meta_json,
+            factors,
+        })
+    }
+
+    /// Load the tables from a saved `output_dir` (one parquet per table plus
+    /// `meta.json`).
+    pub fn from_dir(dir: &Path) -> Result<Self> {
+        let summary_path = dir.join("summary.parquet");
+        if !summary_path.is_file() {
             return Err(DataError::Missing(format!(
                 "{} is not an evaluation output dir (no summary.parquet)",
-                root.display()
+                dir.display()
             )));
         }
-        Ok(Self { root })
+        let read = |name: &str| read_parquet(&dir.join(format!("{name}.parquet")));
+        let monthly_path = dir.join("ic_monthly.parquet");
+        let monthly = if monthly_path.is_file() {
+            Some(read_parquet(&monthly_path)?)
+        } else {
+            None
+        };
+        let meta_path = dir.join("meta.json");
+        let meta_json = if meta_path.is_file() {
+            std::fs::read_to_string(meta_path)?
+        } else {
+            "{}".to_string()
+        };
+        Self::new(
+            read("summary")?,
+            read("ic")?,
+            read("quantile_returns")?,
+            read("portfolio")?,
+            monthly,
+            meta_json,
+        )
     }
 
-    fn path(&self, table: &str) -> PathBuf {
-        self.root.join(format!("{table}.parquet"))
-    }
-
-    /// Read a table, optionally keeping only rows for one factor. Missing files
-    /// (e.g. `ic_monthly` on an integer time axis) surface as `Missing`.
-    fn read(&self, table: &str, factor: Option<&str>) -> Result<DataFrame> {
-        let path = self.path(table);
-        if !path.is_file() {
-            return Err(DataError::Missing(format!("no {table} table")));
+    /// The `meta.json` snapshot with the factor list added.
+    pub fn meta_value(&self) -> Value {
+        let mut value: Value = serde_json::from_str(&self.meta_json).unwrap_or_else(|_| json!({}));
+        if let Value::Object(map) = &mut value {
+            map.insert("factors".into(), json!(self.factors));
         }
-        let mut df = ParquetReader::new(File::open(&path)?).finish()?;
-        if let Some(name) = factor {
-            let mask = df.column("factor")?.str()?.equal(name);
-            df = df.filter(&mask)?;
-        }
-        Ok(stringify_dates(df)?)
-    }
-
-    /// Raw `meta.json` bytes (returned to the client verbatim).
-    pub fn meta_json(&self) -> Result<String> {
-        let path = self.root.join("meta.json");
-        if !path.is_file() {
-            return Err(DataError::Missing("no meta.json".to_string()));
-        }
-        Ok(std::fs::read_to_string(path)?)
-    }
-
-    /// Distinct factor names, in the summary's row order.
-    pub fn factors(&self) -> Result<Vec<String>> {
-        let df = self.read("summary", None)?;
-        let mut seen = HashSet::new();
-        let mut out = Vec::new();
-        for value in df.column("factor")?.str()?.iter().flatten() {
-            if seen.insert(value.to_string()) {
-                out.push(value.to_string());
-            }
-        }
-        Ok(out)
+        value
     }
 
     /// The full summary table as an array of row objects (drives the grid).
-    pub fn summary_records(&self) -> Result<Value> {
-        Ok(Value::Array(df_to_records(&self.read("summary", None)?)))
+    pub fn summary_records(&self) -> Value {
+        Value::Array(df_to_records(&self.summary))
     }
 
     /// Every per-factor series the tearsheet needs, in one payload. All horizons
-    /// are included; the frontend filters client-side so switching horizon needs
-    /// no round-trip. `monthly` is null when there is no `ic_monthly` table.
+    /// are included; the frontend filters client-side. `monthly` is null when
+    /// there is no `ic_monthly` table.
     pub fn factor_bundle(&self, name: &str) -> Result<Value> {
-        if !self.factors()?.iter().any(|f| f == name) {
+        if !self.factors.iter().any(|f| f == name) {
             return Err(DataError::Missing(format!("unknown factor {name:?}")));
         }
         let mut obj = Map::new();
         obj.insert("factor".into(), Value::String(name.to_string()));
-        obj.insert("ic".into(), df_columns(&self.read("ic", Some(name))?)?);
+        obj.insert("ic".into(), df_columns(&filter_factor(&self.ic, name)?)?);
         obj.insert(
             "quantiles".into(),
-            df_columns(&self.read("quantile_returns", Some(name))?)?,
+            df_columns(&filter_factor(&self.quantiles, name)?)?,
         );
         obj.insert(
             "portfolio".into(),
-            df_columns(&self.read("portfolio", Some(name))?)?,
+            df_columns(&filter_factor(&self.portfolio, name)?)?,
         );
         obj.insert(
             "monthly".into(),
-            match self.read("ic_monthly", Some(name)) {
-                Ok(df) => df_columns(&df)?,
-                Err(DataError::Missing(_)) => Value::Null,
-                Err(err) => return Err(err),
+            match &self.monthly {
+                Some(df) => df_columns(&filter_factor(df, name)?)?,
+                None => Value::Null,
             },
         );
         Ok(Value::Object(obj))
     }
+}
+
+fn read_parquet(path: &Path) -> Result<DataFrame> {
+    Ok(ParquetReader::new(File::open(path)?).finish()?)
+}
+
+fn filter_factor(df: &DataFrame, name: &str) -> Result<DataFrame> {
+    let mask = df.column("factor")?.str()?.equal(name);
+    Ok(df.filter(&mask)?)
+}
+
+fn distinct_factors(summary: &DataFrame) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for value in summary.column("factor")?.str()?.iter().flatten() {
+        if seen.insert(value.to_string()) {
+            out.push(value.to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// Cast a `date` column (Date/Datetime) to ISO strings so the JSON carries axis

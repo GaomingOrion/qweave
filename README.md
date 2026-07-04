@@ -62,9 +62,8 @@ stable — a frozen golden baseline guards every change at `1e-8` tolerance.
 - Node-level parallelism and fewer layout transposes in the evaluator.
 - Factor evaluation suite (`with_labels` / `evaluate` / `factor_correlation`,
   with parquet factor-source streaming, a self-contained `EvalResult.to_html()`
-  report, and an interactive Vue + Axum + ECharts report via `qfactors-server` /
-  `EvalResult.serve()`) — landed as experimental; promotion pending a frozen
-  golden fixture.
+  report, and an interactive Vue + Axum + ECharts report via `EvalResult.view()`)
+  — landed as experimental; promotion pending a frozen golden fixture.
 - Publish to PyPI and crates.io.
 - Expanded factor / alpha API documentation.
 
@@ -144,7 +143,7 @@ Python functions:
 - `qfactors.qlib_alpha158(input_alias, alphas=None)`
 - `qfactors.with_labels(...)`, `qfactors.evaluate(...)`,
   `qfactors.factor_correlation(...)`, `EvalResult.to_html(...)`, and the
-  interactive `EvalResult.serve(...)` / `qfactors-server` report
+  interactive `EvalResult.view()` report
   (experimental — see [docs/factor_evaluation.md](docs/factor_evaluation.md))
 
 Input rules:
