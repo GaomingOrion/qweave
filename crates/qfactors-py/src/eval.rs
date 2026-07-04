@@ -3,7 +3,8 @@ use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use qfactors_core::PanelOptions;
 use qfactors_eval::{
-    Binning, Demean, EvalOutput, EvaluateOptions, TableData, evaluate as evaluate_core, save_output,
+    Binning, Demean, EvalOutput, EvaluateOptions, TableData, Weighting, evaluate as evaluate_core,
+    factor_correlation as factor_correlation_core, save_output,
 };
 
 /// Result object for `evaluate`: Polars tables plus the parameter snapshot.
@@ -42,6 +43,26 @@ impl PyEvalResult {
     #[getter]
     fn coverage(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         table_to_py(py, &self.output.coverage)
+    }
+
+    /// Daily top/bottom quantile turnover: date, factor, horizon,
+    /// top_turnover, bottom_turnover.
+    #[getter]
+    fn turnover(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        table_to_py(py, &self.output.turnover)
+    }
+
+    /// Staggered long-short portfolio: date, factor, horizon, gross, net,
+    /// turnover (needs a ret_1 label; NaN otherwise).
+    #[getter]
+    fn portfolio(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        table_to_py(py, &self.output.portfolio)
+    }
+
+    /// Time-mean factor rank autocorrelation: factor, lag, rank_autocorr.
+    #[getter]
+    fn rank_autocorr(&self) -> PyDataFrame {
+        PyDataFrame(self.output.rank_autocorr.clone())
     }
 
     /// Monthly IC means (only when the time column is Date/Datetime).
@@ -104,6 +125,8 @@ fn table_to_py(py: Python<'_>, table: &TableData) -> PyResult<Py<PyAny>> {
     tradable_col = None,
     demean = "none",
     min_cs_count = 30,
+    cost_bps = 0.0,
+    weighting = "factor",
     output_dir = None
 ))]
 #[allow(clippy::too_many_arguments)]
@@ -120,6 +143,8 @@ pub fn evaluate_py(
     tradable_col: Option<String>,
     demean: &str,
     min_cs_count: usize,
+    cost_bps: f64,
+    weighting: &str,
     output_dir: Option<String>,
 ) -> PyResult<PyEvalResult> {
     let panel = PanelOptions {
@@ -145,6 +170,15 @@ pub fn evaluate_py(
             )));
         }
     };
+    let weighting = match weighting {
+        "factor" => Weighting::Factor,
+        "quantile" => Weighting::Quantile,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "weighting must be \"factor\" or \"quantile\"; got {other:?}"
+            )));
+        }
+    };
     let options = EvaluateOptions {
         factor_cols,
         label_cols,
@@ -154,6 +188,8 @@ pub fn evaluate_py(
         min_cs_count,
         group_col,
         tradable_col,
+        cost_bps,
+        weighting,
         output_dir,
     };
 
@@ -161,4 +197,41 @@ pub fn evaluate_py(
         .detach(move || evaluate_core(&df.into(), &panel, &options))
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
     Ok(PyEvalResult { output })
+}
+
+/// Time-averaged daily cross-sectional rank correlation between factors
+/// (pairwise complete observations). Intended for the filtered shortlist
+/// after `evaluate`: every factor column is held densely in memory.
+#[pyfunction(name = "factor_correlation", signature = (
+    df,
+    symbol_col,
+    time_col,
+    factor_cols,
+    tradable_col = None,
+    min_cs_count = 30
+))]
+pub fn factor_correlation_py(
+    py: Python<'_>,
+    df: PyDataFrame,
+    symbol_col: &str,
+    time_col: &str,
+    factor_cols: Vec<String>,
+    tradable_col: Option<String>,
+    min_cs_count: usize,
+) -> PyResult<PyDataFrame> {
+    let panel = PanelOptions {
+        symbol_col: symbol_col.to_string(),
+        time_col: time_col.to_string(),
+    };
+    py.detach(move || {
+        factor_correlation_core(
+            &df.into(),
+            &panel,
+            &factor_cols,
+            tradable_col.as_deref(),
+            min_cs_count,
+        )
+    })
+    .map(PyDataFrame)
+    .map_err(|err| PyValueError::new_err(err.to_string()))
 }

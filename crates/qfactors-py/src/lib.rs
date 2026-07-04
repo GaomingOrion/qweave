@@ -255,6 +255,7 @@ fn qfactors(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(with_labels_py, module)?)?;
     module.add_class::<eval::PyEvalResult>()?;
     module.add_function(wrap_pyfunction!(eval::evaluate_py, module)?)?;
+    module.add_function(wrap_pyfunction!(eval::factor_correlation_py, module)?)?;
     module.add_function(wrap_pyfunction!(worldquant_alpha101_py, module)?)?;
     module.add_function(wrap_pyfunction!(qlib_alpha158_py, module)?)?;
     Ok(())

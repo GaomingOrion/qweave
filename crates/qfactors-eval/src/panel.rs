@@ -18,6 +18,11 @@ pub(crate) struct TimeIndex {
     pub blocks: Vec<Range<usize>>,
     pub orig_index_tn: Vec<usize>,
     pub times_tn: Column,
+    /// Symbol identity per TN row, coded by lexicographic symbol order — so
+    /// within a day block (symbols ascending) codes ascend too, and cross-day
+    /// set operations are linear merges.
+    pub symbol_code_tn: Vec<u32>,
+    pub n_symbols: usize,
 }
 
 pub(crate) fn build_time_index(df: &DataFrame, panel: &PanelOptions) -> Result<TimeIndex> {
@@ -60,12 +65,51 @@ pub(crate) fn build_time_index(df: &DataFrame, panel: &PanelOptions) -> Result<T
     }
 
     let blocks = time_blocks(time_series, &time_changed)?;
+    let (symbol_code_tn, n_symbols) = symbol_codes(symbol_series, &symbol_changed)?;
 
     Ok(TimeIndex {
         blocks,
         orig_index_tn,
         times_tn,
+        symbol_code_tn,
+        n_symbols,
     })
+}
+
+/// Code each TN row's symbol by the symbol's rank in lexicographic order.
+///
+/// Works off the (time, symbol)-sorted frame: `symbol_changed` marks every
+/// first occurrence within a day run, so distinct AnyValues only need hashing
+/// once per (day, symbol) run; the final code map is by sorted symbol order.
+#[allow(clippy::mutable_key_type)]
+fn symbol_codes(symbols: &Series, symbol_changed: &BooleanChunked) -> Result<(Vec<u32>, usize)> {
+    use std::collections::HashMap;
+
+    let n = symbols.len();
+    // First pass: intern distinct symbols (arbitrary provisional codes).
+    let mut interned: HashMap<AnyValue<'static>, u32> = HashMap::new();
+    let mut provisional = vec![0u32; n];
+    let mut current = 0u32;
+    for (row, slot) in provisional.iter_mut().enumerate() {
+        if row == 0 || symbol_changed.get(row).unwrap_or(true) {
+            let value = symbols.get(row)?.into_static();
+            let next = interned.len() as u32;
+            current = *interned.entry(value).or_insert(next);
+        }
+        *slot = current;
+    }
+    // Second pass: remap provisional codes to lexicographic order.
+    let mut pairs: Vec<(AnyValue<'static>, u32)> = interned.into_iter().collect();
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut remap = vec![0u32; pairs.len()];
+    for (rank, (_, provisional_code)) in pairs.iter().enumerate() {
+        remap[*provisional_code as usize] = rank as u32;
+    }
+    let n_symbols = pairs.len();
+    for code in &mut provisional {
+        *code = remap[*code as usize];
+    }
+    Ok((provisional, n_symbols))
 }
 
 /// Day-block boundaries on the sorted time column. The typed fast paths scan a
@@ -164,6 +208,9 @@ mod tests {
         assert_eq!(ti.blocks, [0..1, 1..3]);
         // TN order: (1,B), (2,A), (2,B) -> original rows 0, 1, 2.
         assert_eq!(ti.orig_index_tn, [0, 1, 2]);
+        // Codes by lexicographic symbol order: A=0, B=1.
+        assert_eq!(ti.symbol_code_tn, [1, 0, 1]);
+        assert_eq!(ti.n_symbols, 2);
         assert_eq!(
             ti.times_tn
                 .try_i64()

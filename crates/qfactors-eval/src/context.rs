@@ -20,12 +20,20 @@ pub enum Demean {
     Group,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Weighting {
+    Factor,
+    Quantile,
+}
+
 #[derive(Debug, Clone)]
 pub struct EvalSpec {
     pub quantiles: usize,
     pub binning: Binning,
     pub demean: Demean,
     pub min_cs_count: usize,
+    pub cost_bps: f64,
+    pub weighting: Weighting,
 }
 
 /// Per-run market-side state, built once and shared read-only by all factors.

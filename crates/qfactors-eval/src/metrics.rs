@@ -48,10 +48,10 @@ pub struct FactorOutput {
     pub summary: Vec<SummaryRow>,
 }
 
-struct GlobalBins {
-    cuts: Vec<f64>,
-    min: f64,
-    max: f64,
+pub struct GlobalBins {
+    pub(crate) cuts: Vec<f64>,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
 }
 
 /// One day-chunk's partial results; `ic`/`rank_ic`/`spread` are h-major over
@@ -81,14 +81,24 @@ struct ChunkOutput {
 /// `min_cs_count` pair-valid samples gets NaN ic/rank_ic/spread while its
 /// bucket means remain visible (sample counts tell the story).
 pub fn eval_factor(ctx: &EvalContext, spec: &EvalSpec, factor: &[f64]) -> FactorOutput {
+    let global = match spec.binning {
+        Binning::Global => Some(global_bins(ctx, factor, spec.quantiles)),
+        Binning::Daily => None,
+    };
+    eval_factor_with(ctx, spec, factor, global.as_ref())
+}
+
+/// `eval_factor` with precomputed global bins (shared with the flows pass so
+/// the pooled sort runs once per factor).
+pub(crate) fn eval_factor_with(
+    ctx: &EvalContext,
+    spec: &EvalSpec,
+    factor: &[f64],
+    global: Option<&GlobalBins>,
+) -> FactorOutput {
     let t_days = ctx.blocks.len();
     let n_h = ctx.horizons.len();
     let q = spec.quantiles;
-
-    let global = match spec.binning {
-        Binning::Global => Some(global_bins(ctx, factor, q)),
-        Binning::Daily => None,
-    };
 
     let chunk_ranges: Vec<Range<usize>> = (0..t_days)
         .step_by(DAY_CHUNK)
@@ -96,7 +106,7 @@ pub fn eval_factor(ctx: &EvalContext, spec: &EvalSpec, factor: &[f64]) -> Factor
         .collect();
     let chunks: Vec<ChunkOutput> = chunk_ranges
         .par_iter()
-        .map(|days| eval_day_chunk(ctx, spec, factor, days.clone(), global.as_ref()))
+        .map(|days| eval_day_chunk(ctx, spec, factor, days.clone(), global))
         .collect();
 
     // Merge: chunks are in day order, so quantile rows stay day-sorted.
@@ -420,7 +430,7 @@ fn assign_average_ranks(sorted: &[u32], value: impl Fn(u32) -> f64, out: &mut [f
     }
 }
 
-fn global_bins(ctx: &EvalContext, factor: &[f64], q: usize) -> GlobalBins {
+pub(crate) fn global_bins(ctx: &EvalContext, factor: &[f64], q: usize) -> GlobalBins {
     let mut values: Vec<f64> = (0..factor.len())
         .filter(|&idx| !factor[idx].is_nan() && ctx.tradable.as_ref().is_none_or(|t| t[idx]))
         .map(|idx| factor[idx])
@@ -457,6 +467,8 @@ mod tests {
             binning,
             demean: Demean::None,
             min_cs_count,
+            cost_bps: 0.0,
+            weighting: crate::context::Weighting::Factor,
         }
     }
 

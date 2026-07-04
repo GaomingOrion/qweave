@@ -56,6 +56,12 @@ class EvalResult:
     @property
     def coverage(self) -> pl.DataFrame | pl.LazyFrame: ...
     @property
+    def turnover(self) -> pl.DataFrame | pl.LazyFrame: ...
+    @property
+    def portfolio(self) -> pl.DataFrame | pl.LazyFrame: ...
+    @property
+    def rank_autocorr(self) -> pl.DataFrame: ...
+    @property
     def ic_monthly(self) -> pl.DataFrame | None: ...
     @property
     def meta(self) -> dict[str, Any]: ...
@@ -107,8 +113,20 @@ def evaluate(
     tradable_col: str | None = None,
     demean: str = "none",
     min_cs_count: int = 30,
+    cost_bps: float = 0.0,
+    weighting: str = "factor",
     output_dir: str | None = None,
 ) -> EvalResult: ...
+
+
+def factor_correlation(
+    df: pl.DataFrame,
+    symbol_col: str,
+    time_col: str,
+    factor_cols: Sequence[str],
+    tradable_col: str | None = None,
+    min_cs_count: int = 30,
+) -> pl.DataFrame: ...
 
 
 def col(name: str) -> PyExpr: ...

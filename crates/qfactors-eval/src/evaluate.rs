@@ -6,9 +6,12 @@ use qfactors_core::PanelOptions;
 use qfactors_core::compute_sink::{ComputeResult, ComputeSink};
 use rayon::prelude::*;
 
-use crate::context::{Binning, Demean, EvalContext, EvalSpec, gather_f64_tn, parse_ret_horizon};
+use crate::context::{
+    Binning, Demean, EvalContext, EvalSpec, Weighting, gather_f64_tn, parse_ret_horizon,
+};
 use crate::error::{EvalError, Result};
-use crate::metrics::{FactorOutput, eval_factor};
+use crate::flows::{FlowsOutput, eval_factor_flows};
+use crate::metrics::{FactorOutput, eval_factor_with, global_bins};
 use crate::panel::build_time_index;
 use crate::stats::civil_year_month;
 
@@ -26,6 +29,8 @@ pub struct EvaluateOptions {
     pub min_cs_count: usize,
     pub group_col: Option<String>,
     pub tradable_col: Option<String>,
+    pub cost_bps: f64,
+    pub weighting: Weighting,
     pub output_dir: Option<String>,
 }
 
@@ -41,6 +46,10 @@ pub struct EvalOutput {
     pub ic: TableData,
     pub quantile_returns: TableData,
     pub coverage: TableData,
+    pub turnover: TableData,
+    pub portfolio: TableData,
+    /// Time-mean factor rank autocorrelation per lag (small, always in memory).
+    pub rank_autocorr: DataFrame,
     /// Only present when the time column is Date/Datetime.
     pub ic_monthly: Option<DataFrame>,
     pub meta_json: String,
@@ -72,7 +81,16 @@ pub fn evaluate(
         binning: opts.binning,
         demean: opts.demean,
         min_cs_count: opts.min_cs_count,
+        cost_bps: opts.cost_bps,
+        weighting: opts.weighting,
     };
+    // The staggered long-short portfolio consumes the 1-bar label; without a
+    // ret_1 column the portfolio table stays NaN.
+    let ret1 = ctx
+        .horizons
+        .iter()
+        .position(|&h| h == 1)
+        .map(|idx| ctx.labels[idx].clone());
 
     let day_starts: Vec<IdxSize> = ti.blocks.iter().map(|r| r.start as IdxSize).collect();
     let dates = ti
@@ -95,42 +113,79 @@ pub fn evaluate(
     let ic_path = table_path("ic");
     let quantile_path = table_path("quantile_returns");
     let coverage_path = table_path("coverage");
+    let turnover_path = table_path("turnover");
+    let portfolio_path = table_path("portfolio");
     let mut ic_sink = ComputeSink::for_output(ic_path.as_deref());
     let mut quantile_sink = ComputeSink::for_output(quantile_path.as_deref());
     let mut coverage_sink = ComputeSink::for_output(coverage_path.as_deref());
+    let mut turnover_sink = ComputeSink::for_output(turnover_path.as_deref());
+    let mut portfolio_sink = ComputeSink::for_output(portfolio_path.as_deref());
 
     let mut summary = SummaryColumns::default();
     let mut monthly = MonthlyColumns::default();
+    let mut autocorr = AutocorrColumns::default();
 
     for batch in opts.factor_cols.chunks(FACTOR_BATCH) {
         let factors: Vec<Vec<f64>> = batch
             .par_iter()
             .map(|name| gather_f64_tn(df, name, &ti.orig_index_tn))
             .collect::<Result<_>>()?;
-        let outputs: Vec<FactorOutput> = factors
+        let outputs: Vec<(FactorOutput, FlowsOutput)> = factors
             .par_iter()
-            .map(|factor| eval_factor(&ctx, &spec, factor))
+            .map(|factor| {
+                let global = match spec.binning {
+                    Binning::Global => Some(global_bins(&ctx, factor, spec.quantiles)),
+                    Binning::Daily => None,
+                };
+                let metrics = eval_factor_with(&ctx, &spec, factor, global.as_ref());
+                let flows = eval_factor_flows(
+                    &ctx,
+                    &spec,
+                    factor,
+                    &ti.symbol_code_tn,
+                    ti.n_symbols,
+                    ret1.as_deref(),
+                    global.as_ref(),
+                );
+                (metrics, flows)
+            })
             .collect();
         drop(factors);
+        let metrics: Vec<&FactorOutput> = outputs.iter().map(|(m, _)| m).collect();
+        let flows: Vec<&FlowsOutput> = outputs.iter().map(|(_, f)| f).collect();
 
-        ic_sink.write_observation(assemble_ic(&dates, batch, &ctx.horizons, &outputs)?)?;
+        ic_sink.write_observation(assemble_ic(&dates, batch, &ctx.horizons, &metrics)?)?;
         quantile_sink.write_observation(assemble_quantiles(
             &dates,
             batch,
             &ctx.horizons,
-            &outputs,
+            &metrics,
         )?)?;
-        coverage_sink.write_observation(assemble_coverage(&dates, batch, &outputs)?)?;
+        coverage_sink.write_observation(assemble_coverage(&dates, batch, &metrics)?)?;
+        turnover_sink.write_observation(assemble_turnover(
+            &dates,
+            batch,
+            &ctx.horizons,
+            &flows,
+        )?)?;
+        portfolio_sink.write_observation(assemble_portfolio(
+            &dates,
+            batch,
+            &ctx.horizons,
+            &flows,
+        )?)?;
 
-        for (name, output) in batch.iter().zip(&outputs) {
-            summary.push_factor(name, &ctx.horizons, output);
+        for ((name, metric), flow) in batch.iter().zip(&metrics).zip(&flows) {
+            summary.push_factor(name, &ctx.horizons, metric, flow);
+            autocorr.push_factor(name, flow);
             if let Some(keys) = &month_keys {
-                monthly.push_factor(name, &ctx.horizons, output, keys, t_days);
+                monthly.push_factor(name, &ctx.horizons, metric, keys, t_days);
             }
         }
     }
 
     let summary = summary.into_frame()?;
+    let rank_autocorr = autocorr.into_frame()?;
     let ic_monthly = month_keys.map(|_| monthly.into_frame()).transpose()?;
     let meta_json = meta_json(panel, opts, &label_pairs, t_days, df.height());
 
@@ -138,6 +193,10 @@ pub fn evaluate(
         write_parquet(
             &mut summary.clone(),
             &Path::new(dir).join("summary.parquet"),
+        )?;
+        write_parquet(
+            &mut rank_autocorr.clone(),
+            &Path::new(dir).join("rank_autocorr.parquet"),
         )?;
         if let Some(monthly) = &ic_monthly {
             write_parquet(
@@ -153,6 +212,9 @@ pub fn evaluate(
         ic: finish_sink(ic_sink)?,
         quantile_returns: finish_sink(quantile_sink)?,
         coverage: finish_sink(coverage_sink)?,
+        turnover: finish_sink(turnover_sink)?,
+        portfolio: finish_sink(portfolio_sink)?,
+        rank_autocorr,
         ic_monthly,
         meta_json,
     })
@@ -161,27 +223,35 @@ pub fn evaluate(
 /// Persist an in-memory result under the `save()`/`output_dir` contract:
 /// one parquet per table plus `meta.json`.
 pub fn save_output(output: &EvalOutput, dir: &str) -> Result<()> {
-    let (TableData::Memory(ic), TableData::Memory(quantiles), TableData::Memory(coverage)) =
-        (&output.ic, &output.quantile_returns, &output.coverage)
-    else {
-        let streamed = match &output.ic {
-            TableData::File(path) => Path::new(path)
+    let tables = [
+        ("ic", &output.ic),
+        ("quantile_returns", &output.quantile_returns),
+        ("coverage", &output.coverage),
+        ("turnover", &output.turnover),
+        ("portfolio", &output.portfolio),
+    ];
+    for (_, table) in &tables {
+        if let TableData::File(path) = table {
+            let streamed = Path::new(path)
                 .parent()
                 .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.clone()),
-            TableData::Memory(_) => unreachable!("all tables share one mode"),
-        };
-        return Err(EvalError::AlreadySaved(streamed));
-    };
+                .unwrap_or_else(|| path.to_string());
+            return Err(EvalError::AlreadySaved(streamed));
+        }
+    }
     std::fs::create_dir_all(dir)?;
     let dir = Path::new(dir);
     write_parquet(&mut output.summary.clone(), &dir.join("summary.parquet"))?;
-    write_parquet(&mut ic.clone(), &dir.join("ic.parquet"))?;
     write_parquet(
-        &mut quantiles.clone(),
-        &dir.join("quantile_returns.parquet"),
+        &mut output.rank_autocorr.clone(),
+        &dir.join("rank_autocorr.parquet"),
     )?;
-    write_parquet(&mut coverage.clone(), &dir.join("coverage.parquet"))?;
+    for (name, table) in tables {
+        let TableData::Memory(df) = table else {
+            unreachable!("file mode rejected above");
+        };
+        write_parquet(&mut df.clone(), &dir.join(format!("{name}.parquet")))?;
+    }
     if let Some(monthly) = &output.ic_monthly {
         write_parquet(&mut monthly.clone(), &dir.join("ic_monthly.parquet"))?;
     }
@@ -289,7 +359,7 @@ fn assemble_ic(
     dates: &Series,
     batch: &[String],
     horizons: &[usize],
-    outputs: &[FactorOutput],
+    outputs: &[&FactorOutput],
 ) -> Result<DataFrame> {
     let t = dates.len();
     let rows = batch.len() * horizons.len() * t;
@@ -322,7 +392,7 @@ fn assemble_quantiles(
     dates: &Series,
     batch: &[String],
     horizons: &[usize],
-    outputs: &[FactorOutput],
+    outputs: &[&FactorOutput],
 ) -> Result<DataFrame> {
     let rows: usize = outputs.iter().map(|o| o.q_day.len()).sum();
     let mut date_idx: Vec<IdxSize> = Vec::with_capacity(rows);
@@ -361,7 +431,7 @@ fn assemble_quantiles(
 fn assemble_coverage(
     dates: &Series,
     batch: &[String],
-    outputs: &[FactorOutput],
+    outputs: &[&FactorOutput],
 ) -> Result<DataFrame> {
     let t = dates.len();
     let rows = batch.len() * t;
@@ -404,11 +474,23 @@ struct SummaryColumns {
     spread_t_nw: Vec<f64>,
     monotonicity: Vec<f64>,
     avg_coverage: Vec<f64>,
+    ls_gross_ann: Vec<f64>,
+    ls_net_ann: Vec<f64>,
+    ls_ir: Vec<f64>,
+    ls_turnover: Vec<f64>,
+    top_turnover: Vec<f64>,
+    bottom_turnover: Vec<f64>,
 }
 
 impl SummaryColumns {
-    fn push_factor(&mut self, name: &str, horizons: &[usize], output: &FactorOutput) {
-        for (&h, row) in horizons.iter().zip(&output.summary) {
+    fn push_factor(
+        &mut self,
+        name: &str,
+        horizons: &[usize],
+        output: &FactorOutput,
+        flows: &FlowsOutput,
+    ) {
+        for ((&h, row), flow) in horizons.iter().zip(&output.summary).zip(&flows.summary) {
             self.factor.push(name.to_string());
             self.horizon.push(h as u32);
             self.n_days.push(row.n_days);
@@ -426,6 +508,12 @@ impl SummaryColumns {
             self.spread_t_nw.push(row.spread_t_nw);
             self.monotonicity.push(row.monotonicity);
             self.avg_coverage.push(row.avg_coverage);
+            self.ls_gross_ann.push(flow.ls_gross_ann);
+            self.ls_net_ann.push(flow.ls_net_ann);
+            self.ls_ir.push(flow.ls_ir);
+            self.ls_turnover.push(flow.ls_turnover);
+            self.top_turnover.push(flow.top_turnover);
+            self.bottom_turnover.push(flow.bottom_turnover);
         }
     }
 
@@ -448,6 +536,109 @@ impl SummaryColumns {
             Column::new("spread_t_nw".into(), self.spread_t_nw),
             Column::new("monotonicity".into(), self.monotonicity),
             Column::new("avg_coverage".into(), self.avg_coverage),
+            Column::new("ls_gross_ann".into(), self.ls_gross_ann),
+            Column::new("ls_net_ann".into(), self.ls_net_ann),
+            Column::new("ls_ir".into(), self.ls_ir),
+            Column::new("ls_turnover".into(), self.ls_turnover),
+            Column::new("top_turnover".into(), self.top_turnover),
+            Column::new("bottom_turnover".into(), self.bottom_turnover),
+        ])
+        .map_err(EvalError::from)
+    }
+}
+
+/// Dense per-(factor, horizon, day) tables built from the flows pass: quantile
+/// turnover and the staggered long-short portfolio.
+fn assemble_turnover(
+    dates: &Series,
+    batch: &[String],
+    horizons: &[usize],
+    outputs: &[&FlowsOutput],
+) -> Result<DataFrame> {
+    let t = dates.len();
+    let rows = batch.len() * horizons.len() * t;
+    let mut date_idx: Vec<IdxSize> = Vec::with_capacity(rows);
+    let mut factor: Vec<&str> = Vec::with_capacity(rows);
+    let mut horizon: Vec<u32> = Vec::with_capacity(rows);
+    let mut top: Vec<f64> = Vec::with_capacity(rows);
+    let mut bottom: Vec<f64> = Vec::with_capacity(rows);
+    for (name, output) in batch.iter().zip(outputs) {
+        for (h_idx, &h) in horizons.iter().enumerate() {
+            date_idx.extend(0..t as IdxSize);
+            factor.extend(std::iter::repeat_n(name.as_str(), t));
+            horizon.extend(std::iter::repeat_n(h as u32, t));
+            top.extend_from_slice(&output.top_turnover[h_idx * t..(h_idx + 1) * t]);
+            bottom.extend_from_slice(&output.bottom_turnover[h_idx * t..(h_idx + 1) * t]);
+        }
+    }
+    let date = dates.take(&IdxCa::from_vec("idx".into(), date_idx))?;
+    DataFrame::new_infer_height(vec![
+        date.into_column(),
+        Column::new("factor".into(), factor),
+        Column::new("horizon".into(), horizon),
+        Column::new("top_turnover".into(), top),
+        Column::new("bottom_turnover".into(), bottom),
+    ])
+    .map_err(EvalError::from)
+}
+
+fn assemble_portfolio(
+    dates: &Series,
+    batch: &[String],
+    horizons: &[usize],
+    outputs: &[&FlowsOutput],
+) -> Result<DataFrame> {
+    let t = dates.len();
+    let rows = batch.len() * horizons.len() * t;
+    let mut date_idx: Vec<IdxSize> = Vec::with_capacity(rows);
+    let mut factor: Vec<&str> = Vec::with_capacity(rows);
+    let mut horizon: Vec<u32> = Vec::with_capacity(rows);
+    let mut gross: Vec<f64> = Vec::with_capacity(rows);
+    let mut net: Vec<f64> = Vec::with_capacity(rows);
+    let mut turnover: Vec<f64> = Vec::with_capacity(rows);
+    for (name, output) in batch.iter().zip(outputs) {
+        for (h_idx, &h) in horizons.iter().enumerate() {
+            date_idx.extend(0..t as IdxSize);
+            factor.extend(std::iter::repeat_n(name.as_str(), t));
+            horizon.extend(std::iter::repeat_n(h as u32, t));
+            gross.extend_from_slice(&output.gross[h_idx * t..(h_idx + 1) * t]);
+            net.extend_from_slice(&output.net[h_idx * t..(h_idx + 1) * t]);
+            turnover.extend_from_slice(&output.turnover[h_idx * t..(h_idx + 1) * t]);
+        }
+    }
+    let date = dates.take(&IdxCa::from_vec("idx".into(), date_idx))?;
+    DataFrame::new_infer_height(vec![
+        date.into_column(),
+        Column::new("factor".into(), factor),
+        Column::new("horizon".into(), horizon),
+        Column::new("gross".into(), gross),
+        Column::new("net".into(), net),
+        Column::new("turnover".into(), turnover),
+    ])
+    .map_err(EvalError::from)
+}
+
+#[derive(Default)]
+struct AutocorrColumns {
+    factor: Vec<String>,
+    lag: Vec<u32>,
+    autocorr: Vec<f64>,
+}
+
+impl AutocorrColumns {
+    fn push_factor(&mut self, name: &str, flows: &FlowsOutput) {
+        for &(lag, value) in &flows.autocorr {
+            self.factor.push(name.to_string());
+            self.lag.push(lag);
+            self.autocorr.push(value);
+        }
+    }
+
+    fn into_frame(self) -> Result<DataFrame> {
+        DataFrame::new_infer_height(vec![
+            Column::new("factor".into(), self.factor),
+            Column::new("lag".into(), self.lag),
+            Column::new("rank_autocorr".into(), self.autocorr),
         ])
         .map_err(EvalError::from)
     }
@@ -558,7 +749,8 @@ fn meta_json(
     format!(
         concat!(
             "{{\"symbol_col\":{},\"time_col\":{},\"quantiles\":{},\"binning\":\"{}\",",
-            "\"demean\":\"{}\",\"min_cs_count\":{},\"horizons\":[{}],\"label_cols\":[{}],",
+            "\"demean\":\"{}\",\"min_cs_count\":{},\"cost_bps\":{},\"weighting\":\"{}\",",
+            "\"horizons\":[{}],\"label_cols\":[{}],",
             "\"factor_count\":{},\"group_col\":{},\"tradable_col\":{},\"n_days\":{},",
             "\"n_rows\":{},\"output_dir\":{}}}"
         ),
@@ -568,6 +760,11 @@ fn meta_json(
         binning,
         demean,
         opts.min_cs_count,
+        opts.cost_bps,
+        match opts.weighting {
+            Weighting::Factor => "factor",
+            Weighting::Quantile => "quantile",
+        },
         horizons,
         label_cols,
         opts.factor_cols.len(),
@@ -625,6 +822,8 @@ mod tests {
             min_cs_count: 2,
             group_col: None,
             tradable_col: None,
+            cost_bps: 0.0,
+            weighting: Weighting::Factor,
             output_dir: None,
         }
     }
