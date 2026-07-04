@@ -23,6 +23,15 @@ without moving the hot path out of Rust.
   synthetic golden fixture at `1e-8` tolerance, so engine changes are reviewed
   against stable numerical output.
 
+- **Factor evaluation (experimental):** `with_labels` appends forward-return
+  labels, `evaluate` scores factor columns for predictive power (IC / RankIC
+  with Newey–West t-stats), monotonicity (quantile returns), and tradability
+  (turnover, a staggered long-short portfolio), and `factor_correlation`
+  measures redundancy — all in the same single-DataFrame pipeline. See
+  [docs/factor_evaluation.md](docs/factor_evaluation.md). Calibers are validated
+  against an independent numpy reference and alphalens-reloaded, but the surface
+  is experimental until a frozen golden fixture lands.
+
 The project is early-stage. APIs are usable for experimentation and internal
 research workflows, but should be treated as pre-1.0.
 
@@ -51,6 +60,9 @@ stable — a frozen golden baseline guards every change at `1e-8` tolerance.
 **Planned**
 
 - Node-level parallelism and fewer layout transposes in the evaluator.
+- Factor evaluation suite (`with_labels` / `evaluate` / `factor_correlation`) —
+  landed as experimental; promotion pending a frozen golden fixture, a browser
+  dashboard, and parquet factor-source streaming for thousand-factor runs.
 - Publish to PyPI and crates.io.
 - Expanded factor / alpha API documentation.
 
@@ -128,6 +140,9 @@ Python functions:
 - `qfactors.col(name)`, `qfactors.lit(value)`, and expression operators
 - `qfactors.worldquant_alpha101(input_alias, alphas=None)`
 - `qfactors.qlib_alpha158(input_alias, alphas=None)`
+- `qfactors.with_labels(...)`, `qfactors.evaluate(...)`,
+  `qfactors.factor_correlation(...)` (experimental — see
+  [docs/factor_evaluation.md](docs/factor_evaluation.md))
 
 Input rules:
 
