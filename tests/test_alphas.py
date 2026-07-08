@@ -167,7 +167,7 @@ def test_compute_alphas_file_mode_matches_memory(tmp_path):
 
 
 def test_compute_alphas_releases_gil_while_running():
-    df = _worldquant_input_frame(n_times=2500)
+    df = _worldquant_input_frame(n_times=50_000)
     alphas = qfactors.worldquant_alpha101({})
     started = threading.Event()
     done = threading.Event()
