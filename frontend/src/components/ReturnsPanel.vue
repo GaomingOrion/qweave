@@ -55,7 +55,7 @@ function binMean(h: number): Map<number, number> {
   return out;
 }
 
-const baseGrid = { left: 56, right: 18, top: 48, bottom: 44 };
+const baseGrid = { left: 56, right: 18, top: 48, bottom: 44, containLabel: true };
 const pctTip = { trigger: "axis", valueFormatter: (v: unknown) => pct(v, 3) } as const;
 const dateLabel = { formatter: (v: unknown) => monthLabel(v) };
 const datePointer = { label: { formatter: (o: { value: unknown }) => isoDate(o.value) } };

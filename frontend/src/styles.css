@@ -9,19 +9,6 @@
   --pos: #2563eb;
   --neg: #dc2626;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216;
-    --panel: #141a20;
-    --fg: #e6e8eb;
-    --muted: #9aa4b2;
-    --line: #262b31;
-    --row: #161b21;
-    --accent: #60a5fa;
-    --pos: #60a5fa;
-    --neg: #f87171;
-  }
-}
 * {
   box-sizing: border-box;
 }

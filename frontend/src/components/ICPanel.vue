@@ -142,7 +142,7 @@ const monthlyHeatmap = computed<ECOption>(() => {
   });
   return {
     title: { text: `Monthly ${metricLabel.value} (h=${props.horizon})`, left: "center", textStyle: { fontSize: 13 } },
-    grid: { left: 52, right: 16, top: 36, bottom: 60 },
+    grid: { left: 52, right: 16, top: 36, bottom: 90, containLabel: true },
     tooltip: {
       position: "top",
       formatter: (p) => {
