@@ -40,7 +40,7 @@ async function selectFactor(name: string) {
 
 <template>
   <header>
-    <h1>qfactors evaluation</h1>
+    <h1>qweave evaluation</h1>
     <div class="sub muted" v-if="meta">
       {{ meta.factors.length }} factors · horizons {{ meta.horizons.join(", ") }} ·
       {{ meta.quantiles }} quantiles · {{ meta.binning }} binning · {{ meta.n_days }} days

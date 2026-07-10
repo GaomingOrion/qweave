@@ -3,7 +3,7 @@ import random
 
 import polars as pl
 import pytest
-import qfactors
+import qweave
 
 
 def reference_labels(
@@ -87,7 +87,7 @@ def test_with_labels_matches_polars_reference_on_random_panels():
         df = random_panel(seed)
         horizons = [1, 5, 10]
 
-        out = qfactors.with_labels(
+        out = qweave.with_labels(
             df, symbol_col="asset", time_col="time", horizons=horizons, entry_lag=1
         )
         expected = reference_labels(df, horizons, entry_lag=1)
@@ -100,7 +100,7 @@ def test_with_labels_matches_polars_reference_on_random_panels():
 def test_with_labels_open_entry_and_lag_variants_match_reference():
     df = random_panel(97, drop_rate=0.1)
     for entry_lag, entry_col, exit_col in [(0, "close", "close"), (1, "open", "close"), (2, "close", "open")]:
-        out = qfactors.with_labels(
+        out = qweave.with_labels(
             df,
             symbol_col="asset",
             time_col="time",
@@ -118,7 +118,7 @@ def test_with_labels_open_entry_and_lag_variants_match_reference():
 def test_with_labels_tradable_entry_matches_reference():
     df = random_panel(7, with_tradable=True)
 
-    out = qfactors.with_labels(
+    out = qweave.with_labels(
         df,
         symbol_col="asset",
         time_col="time",
@@ -142,7 +142,7 @@ def test_with_labels_calendar_grid_and_warning():
     calendar = pl.Series("calendar", [1, 2, 3, 4, 5], dtype=pl.Int64)
 
     with pytest.warns(UserWarning, match="1 calendar day"):
-        out = qfactors.with_labels(
+        out = qweave.with_labels(
             df, symbol_col="asset", time_col="time", horizons=[1], calendar=calendar
         )
     expected = reference_labels(df, [1], grid=calendar.rename("time"))
@@ -150,7 +150,7 @@ def test_with_labels_calendar_grid_and_warning():
     assert_frames_match(out, expected, ["ret_1"])
 
     with pytest.raises(ValueError, match="not in the provided calendar"):
-        qfactors.with_labels(
+        qweave.with_labels(
             df,
             symbol_col="asset",
             time_col="time",
@@ -171,7 +171,7 @@ def test_with_labels_date_time_column():
         }
     )
 
-    out = qfactors.with_labels(
+    out = qweave.with_labels(
         df, symbol_col="asset", time_col="time", horizons=[1], entry_lag=0
     )
 
@@ -183,10 +183,10 @@ def test_with_labels_date_time_column():
 
 def test_with_labels_chains_after_with_alphas():
     df = random_panel(3, drop_rate=0.0).drop("open")
-    alpha = (qfactors.col("close") / qfactors.col("close").delay(1)).alias("mom1")
+    alpha = (qweave.col("close") / qweave.col("close").delay(1)).alias("mom1")
 
-    out = qfactors.with_alphas(df, symbol_col="asset", time_col="time", alphas=[alpha])
-    out = qfactors.with_labels(out, symbol_col="asset", time_col="time", horizons=[1, 5])
+    out = qweave.with_alphas(df, symbol_col="asset", time_col="time", alphas=[alpha])
+    out = qweave.with_labels(out, symbol_col="asset", time_col="time", horizons=[1, 5])
 
     assert out.columns == df.columns + ["mom1", "ret_1", "ret_5"]
     assert out.select(df.columns).equals(df)
@@ -196,12 +196,12 @@ def test_with_labels_rejects_bad_inputs():
     df = pl.DataFrame({"asset": ["A"], "time": [1], "close": [1.0], "ret_1": [0.0]})
 
     with pytest.raises(ValueError, match="already exists"):
-        qfactors.with_labels(df, symbol_col="asset", time_col="time", horizons=[1])
+        qweave.with_labels(df, symbol_col="asset", time_col="time", horizons=[1])
     with pytest.raises(ValueError, match="horizons"):
-        qfactors.with_labels(df, symbol_col="asset", time_col="time", horizons=[])
+        qweave.with_labels(df, symbol_col="asset", time_col="time", horizons=[])
     with pytest.raises(ValueError, match="horizons"):
-        qfactors.with_labels(df, symbol_col="asset", time_col="time", horizons=[2, 2])
+        qweave.with_labels(df, symbol_col="asset", time_col="time", horizons=[2, 2])
     with pytest.raises(ValueError, match="expected bool"):
-        qfactors.with_labels(
+        qweave.with_labels(
             df, symbol_col="asset", time_col="time", horizons=[2], tradable_col="close"
         )

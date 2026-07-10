@@ -1,4 +1,4 @@
-// Thin client over the qfactors-server JSON API. Column-oriented payloads
+// Thin client over the qweave-server JSON API. Column-oriented payloads
 // (`Columns`) mirror the parquet tables one-to-one; shaping happens in lib/.
 
 export type Num = number | null;

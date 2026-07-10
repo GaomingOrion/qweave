@@ -32,23 +32,23 @@ source.
 ## Python Extension
 
 `uv run maturin develop` builds and installs the local extension module into the
-project environment. Re-run it after changing Rust code used by `qfactors-py`.
+project environment. Re-run it after changing Rust code used by `qweave-py`.
 
 ## Benchmarks
 
 The synthetic alpha benchmark is an ignored Rust test:
 
 ```bash
-cargo test -p qfactors-factors synthetic_alpha_benchmark -- --ignored --nocapture
+cargo test -p qweave-factors synthetic_alpha_benchmark -- --ignored --nocapture
 ```
 
 Benchmark dimensions can be adjusted with:
 
-- `QFACTORS_BENCH_SYMBOLS`
-- `QFACTORS_BENCH_TIMES`
-- `QFACTORS_BENCH_REPEATS`
+- `QWEAVE_BENCH_SYMBOLS`
+- `QWEAVE_BENCH_TIMES`
+- `QWEAVE_BENCH_REPEATS`
 
-To compare alpha engines locally, set `QF_ENGINE=tree` or `QF_ENGINE=dag`.
+To compare alpha engines locally, set `QWEAVE_ENGINE=tree` or `QWEAVE_ENGINE=dag`.
 
 ### Cross-engine factor benchmarks
 

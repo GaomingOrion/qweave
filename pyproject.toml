@@ -3,9 +3,9 @@ requires = ["maturin>=1.8,<2"]
 build-backend = "maturin"
 
 [project]
-name = "qfactors"
+name = "qweave"
 version = "0.4.0"
-description = "Rust kernel factor framework for Polars panels"
+description = "Rust-powered quantitative research workflow toolkit"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "zer0quant contributors" }]
@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zer0quant/rfactor"
-Repository = "https://github.com/zer0quant/rfactor"
-Issues = "https://github.com/zer0quant/rfactor/issues"
+Homepage = "https://github.com/GaomingOrion/qweave"
+Repository = "https://github.com/GaomingOrion/qweave"
+Issues = "https://github.com/GaomingOrion/qweave/issues"
 
 [dependency-groups]
 dev = [
@@ -35,8 +35,8 @@ dev = [
 ]
 
 [tool.maturin]
-manifest-path = "crates/qfactors-py/Cargo.toml"
-module-name = "qfactors"
+manifest-path = "crates/qweave-py/Cargo.toml"
+module-name = "qweave"
 features = ["extension-module"]
 
 [tool.uv]

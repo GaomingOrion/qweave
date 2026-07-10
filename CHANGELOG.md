@@ -11,7 +11,7 @@ and patch versions should remain backward compatible within a minor line.
 
 ## v0.4.0 - 2026-07-02
 
-- Added `qfactors.qlib_alpha158(input_alias, alphas=None)` — the Qlib Alpha158
+- Added `qweave.qlib_alpha158(input_alias, alphas=None)` — the Qlib Alpha158
   feature set (9 kbar + 4 price + 29 rolling groups × 5 windows = 158 factors)
   as alpha expressions. See `docs/qlib_alpha158.md` for caliber notes.
 - Added `slope`, `rsquare`, `resi`, and `quantile` as expression kernels
@@ -24,7 +24,7 @@ and patch versions should remain backward compatible within a minor line.
 - Breaking: removed the factor-kernel Python API (`compute_panel(...)` and
   `factor_catalog()`). All built-in factors are now alpha expressions computed
   through `compute_alphas` / `with_alphas`.
-- Removed the `qfactors-macros` crate and the `#[factor]`/`#[alpha]` registries;
+- Removed the `qweave-macros` crate and the `#[factor]`/`#[alpha]` registries;
   the WorldQuant 101 and Alpha158 sets are plain Rust builders returning
   `Vec<(String, Expr)>`.
 
@@ -46,12 +46,12 @@ and patch versions should remain backward compatible within a minor line.
 - Added the Python expression API (`PyExpr`) with column/literal constructors,
   arithmetic and comparison operators, time-series windows, cross-sectional
   ranks, group operations, aliases, input collection, and input replacement.
-- Added `qfactors.with_alphas(...)` to append expression outputs to the input
+- Added `qweave.with_alphas(...)` to append expression outputs to the input
   DataFrame while preserving original row order.
-- Changed `qfactors.compute_alphas(...)` to accept aliased expressions and emit
+- Changed `qweave.compute_alphas(...)` to accept aliased expressions and emit
   the full `(time, symbol)` history; `output_path` now writes that full frame to
   Parquet.
-- Added `qfactors.worldquant101_alphas(...)` and `_worldquant101_alphas()` as
+- Added `qweave.worldquant101_alphas(...)` and `_worldquant101_alphas()` as
   the Python discovery/remapping surface for the built-in WorldQuant 101
   expressions.
 - Added Python type stubs for the extension module.

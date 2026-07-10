@@ -5,17 +5,17 @@ import time
 import numpy as np
 import polars as pl
 import pytest
-import qfactors
+import qweave
 
 
 def test_roundtrip_dataframe():
     df = pl.DataFrame({"asset": ["A", "B"], "time": [1, 1], "close": [10.0, 20.0]})
 
-    assert qfactors.roundtrip(df).equals(df)
+    assert qweave.roundtrip(df).equals(df)
 
 
 def test_expression_collect_inputs_replace_inputs_alias_and_output_name():
-    expr = ((qfactors.col("close") + qfactors.col("open")) / qfactors.lit(2.0)).alias("mid")
+    expr = ((qweave.col("close") + qweave.col("open")) / qweave.lit(2.0)).alias("mid")
 
     assert expr.collect_inputs() == {"close", "open"}
     assert expr.output_name() == "mid"
@@ -37,10 +37,10 @@ def test_expression_collect_inputs_replace_inputs_alias_and_output_name():
 
 def test_alpha_executors_do_not_accept_column_aliases():
     df = _alpha_input_frame()
-    expr = qfactors.col("close").alias("close_copy")
+    expr = qweave.col("close").alias("close_copy")
 
     with pytest.raises(TypeError, match="column_aliases"):
-        qfactors.compute_alphas(
+        qweave.compute_alphas(
             df,
             symbol_col="asset",
             time_col="time",
@@ -48,7 +48,7 @@ def test_alpha_executors_do_not_accept_column_aliases():
             column_aliases={"close": "adj_close"},
         )
     with pytest.raises(TypeError, match="column_aliases"):
-        qfactors.with_alphas(
+        qweave.with_alphas(
             df,
             symbol_col="asset",
             time_col="time",
@@ -58,8 +58,8 @@ def test_alpha_executors_do_not_accept_column_aliases():
 
 
 def test_worldquant_alpha101_returns_expression_subset_with_aliases():
-    selected = qfactors.worldquant_alpha101({}, alphas=["alpha13", "alpha101"])
-    all_exprs = qfactors.worldquant_alpha101({})
+    selected = qweave.worldquant_alpha101({}, alphas=["alpha13", "alpha101"])
+    all_exprs = qweave.worldquant_alpha101({})
 
     assert [expr.output_name() for expr in selected] == ["alpha13", "alpha101"]
     assert len(all_exprs) == 101
@@ -72,9 +72,9 @@ def test_worldquant_alpha101_returns_expression_subset_with_aliases():
 
 def test_worldquant_alpha101_rejects_non_worldquant_names():
     with pytest.raises(ValueError, match="factor `group_returns_rank` is not known"):
-        qfactors.worldquant_alpha101({}, alphas=["group_returns_rank"])
+        qweave.worldquant_alpha101({}, alphas=["group_returns_rank"])
     with pytest.raises(ValueError, match="factor `alpha102` is not known"):
-        qfactors.worldquant_alpha101({}, alphas=["alpha102"])
+        qweave.worldquant_alpha101({}, alphas=["alpha102"])
 
 
 def test_qlib_alpha158_returns_subset_with_aliases_and_output_name_filtering():
@@ -86,8 +86,8 @@ def test_qlib_alpha158_returns_subset_with_aliases_and_output_name_filtering():
         "volume": "vol",
         "vwap": "vw",
     }
-    selected = qfactors.qlib_alpha158(aliases, alphas=["KMID", "ROC5", "BETA5", "QTLU5"])
-    all_exprs = qfactors.qlib_alpha158(aliases)
+    selected = qweave.qlib_alpha158(aliases, alphas=["KMID", "ROC5", "BETA5", "QTLU5"])
+    all_exprs = qweave.qlib_alpha158(aliases)
     wanted = {"KMID", "ROC5", "BETA5"}
     filtered = [expr for expr in all_exprs if expr.output_name() in wanted]
 
@@ -118,9 +118,9 @@ def test_qlib_alpha158_returns_subset_with_aliases_and_output_name_filtering():
 
 def test_qlib_alpha158_rejects_unknown_names():
     with pytest.raises(ValueError, match="factor `alpha101` is not known"):
-        qfactors.qlib_alpha158({}, alphas=["alpha101"])
+        qweave.qlib_alpha158({}, alphas=["alpha101"])
     with pytest.raises(ValueError, match="factor `NOT_A_FACTOR` is not known"):
-        qfactors.qlib_alpha158({}, alphas=["NOT_A_FACTOR"])
+        qweave.qlib_alpha158({}, alphas=["NOT_A_FACTOR"])
 
 
 def test_compute_alphas_alpha101_matches_python_baseline():
@@ -168,7 +168,7 @@ def test_compute_alphas_file_mode_matches_memory(tmp_path):
 
 def test_compute_alphas_releases_gil_while_running():
     df = _worldquant_input_frame(n_times=50_000)
-    alphas = qfactors.worldquant_alpha101({})
+    alphas = qweave.worldquant_alpha101({})
     started = threading.Event()
     done = threading.Event()
     errors = []
@@ -207,8 +207,8 @@ def test_compute_alphas_releases_gil_while_running():
 def test_with_alphas_mixes_custom_and_worldquant_exprs_in_original_order():
     df = _alpha_input_frame()
     custom = (
-        (qfactors.col("close") - qfactors.col("open"))
-        / (qfactors.col("high") - qfactors.col("low") + qfactors.lit(0.001))
+        (qweave.col("close") - qweave.col("open"))
+        / (qweave.col("high") - qweave.col("low") + qweave.lit(0.001))
     ).alias("custom")
 
     out = _with_alphas(df, [custom, *_alpha_exprs(["alpha101"])])
@@ -256,10 +256,10 @@ def test_new_rolling_methods_compute_expected_values():
         }
     )
     alphas = [
-        qfactors.col("close").slope(3).alias("slope"),
-        qfactors.col("close").rsquare(3).alias("rsquare"),
-        qfactors.col("close").resi(3).alias("resi"),
-        qfactors.col("close").quantile(3, 0.8).alias("q80"),
+        qweave.col("close").slope(3).alias("slope"),
+        qweave.col("close").rsquare(3).alias("rsquare"),
+        qweave.col("close").resi(3).alias("resi"),
+        qweave.col("close").quantile(3, 0.8).alias("q80"),
     ]
 
     out = _compute_alphas(df, alphas=alphas)
@@ -293,7 +293,7 @@ def test_qlib_alpha158_representatives_match_numpy_reference():
         "VSUMD5",
     ]
 
-    out = _compute_alphas(df, alphas=qfactors.qlib_alpha158({}, alphas=names))
+    out = _compute_alphas(df, alphas=qweave.qlib_alpha158({}, alphas=names))
     expected = _qlib_reference(arrays)
     asset_index = {asset: idx for idx, asset in enumerate(arrays["assets"])}
     rows = out.select(["time", "asset"]).rows()
@@ -305,7 +305,7 @@ def test_qlib_alpha158_representatives_match_numpy_reference():
 
 
 def _compute_alphas(df, alphas, output_path=None):
-    return qfactors.compute_alphas(
+    return qweave.compute_alphas(
         df,
         symbol_col="asset",
         time_col="time",
@@ -315,7 +315,7 @@ def _compute_alphas(df, alphas, output_path=None):
 
 
 def _with_alphas(df, alphas):
-    return qfactors.with_alphas(
+    return qweave.with_alphas(
         df,
         symbol_col="asset",
         time_col="time",
@@ -324,7 +324,7 @@ def _with_alphas(df, alphas):
 
 
 def _alpha_exprs(names):
-    return qfactors.worldquant_alpha101({}, alphas=names)
+    return qweave.worldquant_alpha101({}, alphas=names)
 
 
 def _qlib_input_frame(n_times=12):

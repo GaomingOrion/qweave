@@ -70,5 +70,5 @@ def test_qlib_provider_writer_creates_minimal_binary_layout(tmp_path):
 
 
 def test_default_engines_follow_workload():
-    assert bench.default_engines("alpha158") == ["qfactors", "qlib"]
-    assert bench.default_engines("worldquant101") == ["qfactors", "kunquant"]
+    assert bench.default_engines("alpha158") == ["qweave", "qlib"]
+    assert bench.default_engines("worldquant101") == ["qweave", "kunquant"]

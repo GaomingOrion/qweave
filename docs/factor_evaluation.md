@@ -18,7 +18,7 @@ Evaluation is a single-DataFrame pipeline. Each stage appends columns in the
 original row order; nothing is joined:
 
 ```python
-import qfactors as qf
+import qweave as qf
 
 # 1) factor columns (existing API)
 df = qf.with_alphas(df, symbol_col="symbol", time_col="date",
@@ -241,14 +241,14 @@ result = qf.evaluate(df, "symbol", "date", factor_cols)
 result.view()  # opens the browser; blocks until Ctrl-C
 ```
 
-The server (`qfactors-server`) and the compiled frontend are embedded in the
+The server (`qweave-server`) and the compiled frontend are embedded in the
 extension module — `view()` needs no ports, paths, or external binary. It is
 read-only and filters the in-memory tables per factor, so use it on a filtered
 shortlist rather than a thousand-factor run. `view()` is memory-mode only; for a
 streamed `output_dir`, `save(dir)` then serve it from the CLI:
 
 ```powershell
-cargo run -p qfactors-server -- --dir <output_dir> --open
+cargo run -p qweave-server -- --dir <output_dir> --open
 ```
 
 Building the Python wheel embeds the frontend, so build the SPA first (one-time,

@@ -1,0 +1,18 @@
+[package]
+name = "qweave-eval"
+version = "0.4.0"
+description = "Factor evaluation kernels for qweave"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+polars.workspace = true
+qweave-core = { path = "../qweave-core" }
+rayon.workspace = true
+thiserror.workspace = true

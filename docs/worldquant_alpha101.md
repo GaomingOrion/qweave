@@ -1,6 +1,6 @@
 # WorldQuant 101 Alphas
 
-qfactors builds `alpha1` through `alpha101` as built-in alpha expressions.
+qweave builds `alpha1` through `alpha101` as built-in alpha expressions.
 The implementation follows the formula set from Kakushadze, "101 Formulaic
 Alphas", Appendix A, with project-specific defaults documented here.
 
@@ -9,11 +9,11 @@ Alphas", Appendix A, with project-specific defaults documented here.
 Use:
 
 ```python
-alphas = qfactors.worldquant_alpha101(
+alphas = qweave.worldquant_alpha101(
     {"close": "adj_close"},
     alphas=["alpha13", "alpha101"],
 )
-qfactors.compute_alphas(df, "asset", "time", alphas)
+qweave.compute_alphas(df, "asset", "time", alphas)
 ```
 
 `worldquant_alpha101(input_alias, alphas=None)` returns `PyExpr` objects for the

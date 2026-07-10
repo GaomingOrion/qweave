@@ -1,13 +1,13 @@
 # Python Expression API
 
-qfactors 0.3 introduces an eager expression API for alpha research. Expressions
+qweave 0.3 introduces an eager expression API for alpha research. Expressions
 are plain Python objects backed by the Rust `Expr` tree; executors evaluate a
 list of expressions immediately.
 
 ## Construct Expressions
 
 ```python
-import qfactors as qf
+import qweave as qf
 
 intraday_return = (
     (qf.col("close") - qf.col("open"))

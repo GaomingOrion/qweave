@@ -7,10 +7,10 @@ This manifest records the implementation defaults for the built-in `alpha1` thro
 
 - Status: implemented and registered.
 - Source formula set: Kakushadze, "101 Formulaic Alphas", Appendix A.
-- Rust location: `crates/qfactors-factors/src/worldquant101.rs`, plus the previously
+- Rust location: `crates/qweave-factors/src/worldquant101.rs`, plus the previously
   existing `alpha6`, `alpha8`, `alpha12`, `alpha13`, and `alpha101` in `alphas.rs`.
-- Public Python surface: use `qfactors.worldquant101_alphas(...)` to obtain
-  expressions, then `qfactors.compute_alphas(...)` or `qfactors.with_alphas(...)`.
+- Public Python surface: use `qweave.worldquant101_alphas(...)` to obtain
+  expressions, then `qweave.compute_alphas(...)` or `qweave.with_alphas(...)`.
 
 ## Defaults
 
@@ -27,7 +27,7 @@ This manifest records the implementation defaults for the built-in `alpha1` thro
 ## Operator calibers
 
 The paper leaves several operators under-specified, and reference implementations
-disagree. These are the concrete calibers qfactors uses. Where relevant the
+disagree. These are the concrete calibers qweave uses. Where relevant the
 DolphinDB `wq101alpha.dos` reference is noted, since it is a common cross-check.
 
 - **`rank(x)` (cross-sectional):** percentile. Within each cross-section over the
@@ -46,7 +46,7 @@ DolphinDB `wq101alpha.dos` reference is noted, since it is a common cross-check.
   within the window, counted from the oldest day (`0`) to the current day (`d-1`);
   the earliest occurrence wins on ties. Matches DolphinDB `mimax` / `mimin`.
 - **Comparisons (`<, >, <=, >=, ==`) and `where(cond, a, b)`:** NaN propagates. Any
-  NaN operand yields NaN, and a NaN condition yields NaN — qfactors never coerces
+  NaN operand yields NaN, and a NaN condition yields NaN — qweave never coerces
   NaN to a boolean. (DolphinDB instead treats NULL as −∞ in comparisons, so its
   boolean results are always defined; this is why DolphinDB reports more finite
   cells during warmup for comparison/boolean alphas.)
@@ -63,17 +63,17 @@ DolphinDB `wq101alpha.dos` reference is noted, since it is a common cross-check.
 ## Caliber notes and cross-reference differences
 
 Places where a formula's result depends on a caliber choice above, or where a
-common reference diverges. Useful when reconciling qfactors against another engine.
+common reference diverges. Useful when reconciling qweave against another engine.
 
 - **`ts_rank` scale-sensitive alphas:** `alpha4`, `alpha35`, `alpha43`, `alpha52`,
   `alpha84` consume `ts_rank` in an arithmetic context, so their magnitude depends
   on the percentile-vs-raw caliber. They match DolphinDB only under `ts_rank_raw`.
 - **`ts_argmax` / `ts_argmin` alphas:** `alpha1`, `alpha57`, `alpha60`, `alpha96`,
   `alpha98`, `alpha100` depend on the position caliber (from oldest, earliest tie).
-- **`alpha14`:** qfactors follows the paper's `correlation(open, volume, 10)`.
+- **`alpha14`:** qweave follows the paper's `correlation(open, volume, 10)`.
   DolphinDB's reference uses covariance (`mcovar`) here, which differs in scale by
   orders of magnitude.
-- **`alpha83`:** qfactors follows the paper grouping
+- **`alpha83`:** qweave follows the paper grouping
   `... / ((high - low) / (sum(close, 5) / 5) / (vwap - close))`. DolphinDB's
   reference evaluates the trailing chained division left-to-right, a different
   grouping.

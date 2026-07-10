@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
 // Assets are served from the axum static mount at "/", so keep paths relative.
-// In dev, proxy the API to the standalone server (qfactors-server --port 8080).
+// In dev, proxy the API to the standalone server (qweave-server --port 8080).
 export default defineConfig({
   base: "./",
   plugins: [vue()],

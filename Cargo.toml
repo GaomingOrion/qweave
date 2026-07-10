@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "crates/qfactors-core",
-    "crates/qfactors-eval",
-    "crates/qfactors-factors",
-    "crates/qfactors-py",
-    "crates/qfactors-server",
+    "crates/qweave-core",
+    "crates/qweave-eval",
+    "crates/qweave-factors",
+    "crates/qweave-py",
+    "crates/qweave-server",
 ]
 resolver = "3"
 
@@ -12,7 +12,7 @@ resolver = "3"
 authors = ["zer0quant contributors"]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/zer0quant/rfactor"
+repository = "https://github.com/GaomingOrion/qweave"
 rust-version = "1.85"
 keywords = ["quant", "factors", "polars", "finance"]
 categories = ["algorithms", "science"]

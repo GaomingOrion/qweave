@@ -1,10 +1,12 @@
-# qfactors
+# qweave
 
-qfactors is a Rust factor and alpha computation engine with Python bindings for
-Polars panels. It is built for research workflows that need Python ergonomics
-without moving the hot path out of Rust.
+qweave is a Rust-powered quantitative research workflow toolkit with Python
+bindings for Polars panels. The current implementation covers factor and alpha
+computation, forward-return labels, factor evaluation, and interactive reports;
+the broader project direction is an end-to-end workflow for factor research,
+quantitative modeling, strategy construction, and backtesting.
 
-## Why qfactors
+## Why qweave
 
 - **Polars-native Python workflow:** pass in a Polars DataFrame and get a Polars
   DataFrame back. `with_alphas` appends results in the original row order, while
@@ -13,7 +15,7 @@ without moving the hot path out of Rust.
   cross-sectional operators, and expression evaluation run in Rust with rayon
   parallelism where it is already proven useful.
 - **Expression API for research iteration:** compose alphas with
-  `qfactors.col("close")`, `qfactors.lit(1.0)`, operators, windows, ranks,
+  `qweave.col("close")`, `qweave.lit(1.0)`, operators, windows, ranks,
   neutralization, and `replace_inputs()` templates.
 - **Factor libraries built in:** `worldquant_alpha101()` returns `alpha1`
   through `alpha101`, and `qlib_alpha158()` returns the Qlib Alpha158 feature
@@ -37,9 +39,10 @@ research workflows, but should be treated as pre-1.0.
 
 ## Roadmap
 
-qfactors is pre-1.0 and under active development. The current focus is the
-performance of the alpha expression engine while keeping results numerically
-stable — a frozen golden baseline guards every change at `1e-8` tolerance.
+qweave is pre-1.0 and under active development. The current implementation
+focuses on fast factor computation and factor evaluation while keeping results
+numerically stable — a frozen golden baseline guards alpha-engine changes at
+`1e-8` tolerance.
 
 **Done**
 
@@ -54,7 +57,7 @@ stable — a frozen golden baseline guards every change at `1e-8` tolerance.
 - DAG evaluator — hash-consed common-subexpression elimination, slot reuse,
   node-level parallelism, and fused elementwise chains — promoted to the default
   engine after benchmarking faster than the tree evaluator across WorldQuant 101
-  and Alpha158. The tree evaluator remains available (`QF_ENGINE=tree`) as an
+  and Alpha158. The tree evaluator remains available (`QWEAVE_ENGINE=tree`) as an
   independent reference.
 
 **Planned**
@@ -64,6 +67,7 @@ stable — a frozen golden baseline guards every change at `1e-8` tolerance.
   with parquet factor-source streaming, a self-contained `EvalResult.to_html()`
   report, and an interactive Vue + Axum + ECharts report via `EvalResult.view()`)
   — landed as experimental; promotion pending a frozen golden fixture.
+- Quantitative modeling, strategy construction, and backtesting modules.
 - Publish to PyPI and crates.io.
 - Expanded factor / alpha API documentation.
 
@@ -92,7 +96,7 @@ nightly toolchain automatically.
 
 ```python
 import polars as pl
-import qfactors
+import qweave
 
 df = pl.DataFrame(
     {
@@ -106,22 +110,22 @@ df = pl.DataFrame(
     }
 )
 
-alphas = qfactors.worldquant_alpha101({}, alphas=["alpha101"])
-out = qfactors.compute_alphas(
+alphas = qweave.worldquant_alpha101({}, alphas=["alpha101"])
+out = qweave.compute_alphas(
     df=df,
     symbol_col="asset",
     time_col="time",
     alphas=alphas,
 )
 
-df_with_alpha = qfactors.with_alphas(
+df_with_alpha = qweave.with_alphas(
     df=df,
     symbol_col="asset",
     time_col="time",
     alphas=[
         (
-            (qfactors.col("close") - qfactors.col("open"))
-            / (qfactors.col("high") - qfactors.col("low") + qfactors.lit(0.001))
+            (qweave.col("close") - qweave.col("open"))
+            / (qweave.col("high") - qweave.col("low") + qweave.lit(0.001))
         ).alias("intraday_return")
     ],
 )
@@ -136,13 +140,13 @@ row order.
 
 Python functions:
 
-- `qfactors.compute_alphas(df, symbol_col, time_col, alphas, output_path=None)`
-- `qfactors.with_alphas(df, symbol_col, time_col, alphas)`
-- `qfactors.col(name)`, `qfactors.lit(value)`, and expression operators
-- `qfactors.worldquant_alpha101(input_alias, alphas=None)`
-- `qfactors.qlib_alpha158(input_alias, alphas=None)`
-- `qfactors.with_labels(...)`, `qfactors.evaluate(...)`,
-  `qfactors.factor_correlation(...)`, `EvalResult.to_html(...)`, and the
+- `qweave.compute_alphas(df, symbol_col, time_col, alphas, output_path=None)`
+- `qweave.with_alphas(df, symbol_col, time_col, alphas)`
+- `qweave.col(name)`, `qweave.lit(value)`, and expression operators
+- `qweave.worldquant_alpha101(input_alias, alphas=None)`
+- `qweave.qlib_alpha158(input_alias, alphas=None)`
+- `qweave.with_labels(...)`, `qweave.evaluate(...)`,
+  `qweave.factor_correlation(...)`, `EvalResult.to_html(...)`, and the
   interactive `EvalResult.view()` report
   (experimental — see [docs/factor_evaluation.md](docs/factor_evaluation.md))
 
@@ -170,7 +174,7 @@ Memory note:
 selected explicitly — it serves as an independent reference implementation:
 
 ```bash
-QF_ENGINE=tree uv run pytest
+QWEAVE_ENGINE=tree uv run pytest
 ```
 
 Valid values are `dag` and `tree`; invalid values raise an error. Both engines

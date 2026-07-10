@@ -1,6 +1,6 @@
 # Security Policy
 
-qfactors is an early-stage open source project and does not yet have a formal
+qweave is an early-stage open source project and does not yet have a formal
 security response program.
 
 Please do not include private market data, credentials, tokens, or proprietary

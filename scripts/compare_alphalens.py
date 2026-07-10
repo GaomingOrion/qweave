@@ -1,4 +1,4 @@
-"""Cross-check qfactors.evaluate against alphalens-reloaded (dev-only, not CI).
+"""Cross-check qweave.evaluate against alphalens-reloaded (dev-only, not CI).
 
 Run with an ephemeral alphalens install:
 
@@ -21,7 +21,7 @@ import sys
 import numpy as np
 import polars as pl
 
-import qfactors
+import qweave
 
 try:
     import pandas as pd
@@ -54,21 +54,21 @@ def build_data(seed=0):
     return prices, factor
 
 
-def qfactors_results(prices, factor):
+def qweave_results(prices, factor):
     rows = prices.stack().rename("close").reset_index()
     rows.columns = ["date", "asset", "close"]
     factor_rows = factor.rename("f").reset_index()
     merged = rows.merge(factor_rows, on=["date", "asset"])
     df = pl.from_pandas(merged)
 
-    df = qfactors.with_labels(
+    df = qweave.with_labels(
         df,
         symbol_col="asset",
         time_col="date",
         horizons=HORIZONS,
         entry_lag=0,
     )
-    return qfactors.evaluate(
+    return qweave.evaluate(
         df,
         symbol_col="asset",
         time_col="date",
@@ -81,7 +81,7 @@ def qfactors_results(prices, factor):
 
 def main():
     prices, factor = build_data()
-    result = qfactors_results(prices, factor)
+    result = qweave_results(prices, factor)
     ours_ic = result.ic.to_pandas()
     ours_q = result.quantile_returns.to_pandas()
 

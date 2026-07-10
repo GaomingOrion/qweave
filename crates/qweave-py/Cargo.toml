@@ -1,0 +1,41 @@
+[package]
+name = "qweave-py"
+version = "0.4.0"
+description = "Python extension module for qweave"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "qweave"
+crate-type = ["cdylib"]
+
+[features]
+default = []
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+polars.workspace = true
+# `abi3-py310` builds against the CPython stable ABI so one wheel per platform
+# covers Python 3.10+ (see `requires-python`), instead of one wheel per version.
+pyo3 = { workspace = true, features = ["abi3-py310"] }
+pyo3-polars.workspace = true
+qweave-core = { path = "../qweave-core" }
+qweave-eval = { path = "../qweave-eval" }
+qweave-factors = { path = "../qweave-factors" }
+qweave-server = { path = "../qweave-server" }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# `disable_initial_exec_tls` makes jemalloc use the global-dynamic TLS model so
+# this cdylib can be dlopen'd as a Python extension on Linux/glibc; the default
+# initial-exec model fails import with "cannot allocate memory in static TLS
+# block".
+tikv-jemallocator = { version = "0.7.0", features = ["disable_initial_exec_tls"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+mimalloc = "0.1.52"

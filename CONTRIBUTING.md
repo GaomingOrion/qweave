@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for taking the time to improve qfactors. Keep changes focused and
+Thanks for taking the time to improve qweave. Keep changes focused and
 verifiable.
 
 ## Setup
@@ -28,7 +28,7 @@ uv run pytest
 ## Test Data
 
 Do not commit private market data, credentials, local paths, or generated build
-artifacts. The checked-in golden fixture under `crates/qfactors-factors/tests`
+artifacts. The checked-in golden fixture under `crates/qweave-factors/tests`
 is synthetic test data.
 
 If an intentional alpha implementation change requires updating the golden

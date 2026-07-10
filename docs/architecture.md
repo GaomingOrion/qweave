@@ -1,21 +1,21 @@
 # Architecture
 
-qfactors is organized as a Rust workspace with a Python extension module.
+qweave is organized as a Rust workspace with a Python extension module.
 
 ## Crates
 
-- `qfactors-core`: panel layout, column validation, alpha expression evaluation,
+- `qweave-core`: panel layout, column validation, alpha expression evaluation,
   and result sinks.
-- `qfactors-factors`: built-in alpha builders — WorldQuant 101 and Qlib
+- `qweave-factors`: built-in alpha builders — WorldQuant 101 and Qlib
   Alpha158.
-- `qfactors-py`: PyO3 extension module exposing the Rust engine to Python as
-  `qfactors`.
+- `qweave-py`: PyO3 extension module exposing the Rust engine to Python as
+  `qweave`.
 
 ## Data Flow
 
 1. Python or Rust callers provide a Polars DataFrame, symbol/time column names,
    and a list of aliased alpha expressions.
-2. `qfactors-core` validates structural columns, sorts the panel by
+2. `qweave-core` validates structural columns, sorts the panel by
    `(symbol, time)`, and builds the internal cell set.
 3. The evaluator computes each expression over the full panel.
 4. Results are returned in memory as a `(time, symbol)` frame, appended to the
@@ -25,6 +25,6 @@ qfactors is organized as a Rust workspace with a Python extension module.
 ## Alpha Evaluation
 
 The default alpha evaluator walks expression trees independently. The optional
-`QF_ENGINE=dag` evaluator lowers requested alphas into a shared DAG for local
+`QWEAVE_ENGINE=dag` evaluator lowers requested alphas into a shared DAG for local
 benchmarking and common-subexpression reuse. The DAG engine is experimental and
 not the default.

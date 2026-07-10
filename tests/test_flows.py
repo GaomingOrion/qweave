@@ -3,7 +3,7 @@ import math
 import numpy as np
 import polars as pl
 import pytest
-import qfactors
+import qweave
 
 from test_evaluate import avg_rank, make_panel, run_evaluate
 
@@ -249,7 +249,7 @@ def test_flows_save_and_streaming(tmp_path):
 
 def test_factor_correlation_matches_reference():
     df = make_panel(61)
-    out = qfactors.factor_correlation(
+    out = qweave.factor_correlation(
         df,
         symbol_col="asset",
         time_col="time",
@@ -291,7 +291,7 @@ def test_factor_correlation_matches_reference():
 
 def test_factor_correlation_monotone_transform_is_one():
     df = make_panel(67, nan_rate=0.0).with_columns(pl.col("f1").exp().alias("f1_exp"))
-    out = qfactors.factor_correlation(
+    out = qweave.factor_correlation(
         df, symbol_col="asset", time_col="time", factor_cols=["f1", "f1_exp"], min_cs_count=4
     )
     assert out.get_column("f1_exp")[0] == pytest.approx(1.0, abs=1e-12)

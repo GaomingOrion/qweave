@@ -2454,68 +2454,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qfactors-core"
-version = "0.4.0"
-dependencies = [
- "polars",
- "rayon",
- "thiserror",
-]
-
-[[package]]
-name = "qfactors-eval"
-version = "0.4.0"
-dependencies = [
- "polars",
- "qfactors-core",
- "rayon",
- "thiserror",
-]
-
-[[package]]
-name = "qfactors-factors"
-version = "0.4.0"
-dependencies = [
- "mimalloc",
- "polars",
- "qfactors-core",
- "tikv-jemallocator",
-]
-
-[[package]]
-name = "qfactors-py"
-version = "0.4.0"
-dependencies = [
- "mimalloc",
- "polars",
- "pyo3",
- "pyo3-polars",
- "qfactors-core",
- "qfactors-eval",
- "qfactors-factors",
- "qfactors-server",
- "tikv-jemallocator",
-]
-
-[[package]]
-name = "qfactors-server"
-version = "0.4.0"
-dependencies = [
- "axum",
- "clap",
- "http-body-util",
- "include_dir",
- "polars",
- "qfactors-core",
- "qfactors-eval",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tower-http",
-]
-
-[[package]]
 name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2587,6 +2525,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "qweave-core"
+version = "0.4.0"
+dependencies = [
+ "polars",
+ "rayon",
+ "thiserror",
+]
+
+[[package]]
+name = "qweave-eval"
+version = "0.4.0"
+dependencies = [
+ "polars",
+ "qweave-core",
+ "rayon",
+ "thiserror",
+]
+
+[[package]]
+name = "qweave-factors"
+version = "0.4.0"
+dependencies = [
+ "mimalloc",
+ "polars",
+ "qweave-core",
+ "tikv-jemallocator",
+]
+
+[[package]]
+name = "qweave-py"
+version = "0.4.0"
+dependencies = [
+ "mimalloc",
+ "polars",
+ "pyo3",
+ "pyo3-polars",
+ "qweave-core",
+ "qweave-eval",
+ "qweave-factors",
+ "qweave-server",
+ "tikv-jemallocator",
+]
+
+[[package]]
+name = "qweave-server"
+version = "0.4.0"
+dependencies = [
+ "axum",
+ "clap",
+ "http-body-util",
+ "include_dir",
+ "polars",
+ "qweave-core",
+ "qweave-eval",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # qlib Alpha158
 
-qfactors builds the Microsoft Qlib `Alpha158` feature set as 158 built-in alpha
+qweave builds the Microsoft Qlib `Alpha158` feature set as 158 built-in alpha
 expressions. The formulas follow Qlib's `Alpha158` handler; project-specific
 calibers are documented below.
 
@@ -49,11 +49,11 @@ All factors are per-symbol time-series or element-wise; none use a cross-section
 ## Public Surface
 
 ```python
-alphas = qfactors.qlib_alpha158(
+alphas = qweave.qlib_alpha158(
     {"close": "adj_close"},
     alphas=["KMID", "MA5", "CORR20"],
 )
-qfactors.compute_alphas(df, "asset", "time", alphas)
+qweave.compute_alphas(df, "asset", "time", alphas)
 ```
 
 `qlib_alpha158(input_alias, alphas=None)` returns `PyExpr` objects for the
@@ -72,12 +72,12 @@ Every factor references only `open`, `high`, `low`, `close`, `volume`, and
 ## Calibers (differences from Qlib)
 
 - **Warmup.** Qlib rolls with `min_periods=1`, emitting partial-window values
-  from the first row. qfactors requires a full, NaN-free window, so each symbol's
+  from the first row. qweave requires a full, NaN-free window, so each symbol's
   first `d − 1` rows are `NaN`. Factors built on a one-step delay/delta (`ROC`,
   `CNTP`/`CNTN`/`CNTD`, the `SUM*`/`VSUM*` families, `CORD`) begin one row later
   because the `delay(x, 1)` term is `NaN` on the first row and propagates through
   the window.
-- **`IMAX`/`IMIN` offset.** qfactors `ts_argmax`/`ts_argmin` are 0-based (position
+- **`IMAX`/`IMIN` offset.** qweave `ts_argmax`/`ts_argmin` are 0-based (position
   within the window, 0 = oldest) while Qlib `IdxMax`/`IdxMin` are 1-based. The
   builder adds `+1` so `IMAX`/`IMIN` match Qlib. In `IMXD` the two offsets cancel,
   so it is built without `+1`.

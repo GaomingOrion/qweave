@@ -1,0 +1,32 @@
+[package]
+name = "qweave-server"
+version = "0.4.0"
+description = "Interactive factor-evaluation report server for qweave"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "../../README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "qweave-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+include_dir = "0.7"
+polars.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+[dev-dependencies]
+qweave-eval = { path = "../qweave-eval" }
+qweave-core = { path = "../qweave-core" }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

@@ -1,12 +1,12 @@
-"""Compare qfactors factor computation against representative factor engines.
+"""Compare qweave factor computation against representative factor engines.
 
 Usage:
 
     uv run maturin develop --release
     uv run python scripts/bench_factor_engines.py --workload alpha158
-    uv run python scripts/bench_factor_engines.py --workload worldquant101 --engines qfactors,kunquant
+    uv run python scripts/bench_factor_engines.py --workload worldquant101 --engines qweave,kunquant
 
-The default benchmark compares qfactors with, when pyqlib is installed, Qlib
+The default benchmark compares qweave with, when pyqlib is installed, Qlib
 Alpha158DL over a generated local provider. KunQuant is optional; when the
 package and a C++ toolchain are available, the same CLI runs the package's
 supported WorldQuant Alpha101 subset.
@@ -294,17 +294,17 @@ def run_qlib_alpha158_prepared(
     return loader.load(instruments=instruments, start_time=start_time, end_time=end_time)
 
 
-def run_qfactors(df: pl.DataFrame, workload: str, names: Iterable[str] | None = None) -> pl.DataFrame:
-    qfactors = importlib.import_module("qfactors")
+def run_qweave(df: pl.DataFrame, workload: str, names: Iterable[str] | None = None) -> pl.DataFrame:
+    qweave = importlib.import_module("qweave")
     if workload == "alpha158":
         selected = list(names) if names else None
-        alphas = qfactors.qlib_alpha158({}, alphas=selected)
+        alphas = qweave.qlib_alpha158({}, alphas=selected)
     elif workload == "worldquant101":
         selected = worldquant_names(names)
-        alphas = qfactors.worldquant_alpha101({}, alphas=selected)
+        alphas = qweave.worldquant_alpha101({}, alphas=selected)
     else:
-        raise ValueError(f"unsupported qfactors workload: {workload}")
-    return qfactors.compute_alphas(df, symbol_col="asset", time_col="time", alphas=alphas)
+        raise ValueError(f"unsupported qweave workload: {workload}")
+    return qweave.compute_alphas(df, symbol_col="asset", time_col="time", alphas=alphas)
 
 
 def _kunquant_alpha_attr(name: str) -> str:
@@ -315,7 +315,7 @@ def _kunquant_alpha_attr(name: str) -> str:
 def ascii_temp_root() -> Path | None:
     if os.name != "nt":
         return None
-    root = Path(os.environ.get("QFACTORS_BENCH_TMP", r"C:\qfactors-bench-tmp"))
+    root = Path(os.environ.get("QWEAVE_BENCH_TMP", r"C:\qweave-bench-tmp"))
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -360,7 +360,7 @@ def run_kunquant_worldquant101(
     compile_start = time.perf_counter()
     function = Function(builder.ops)
     with tempfile.TemporaryDirectory(
-        prefix="qf-kunquant-",
+        prefix="qweave-kunquant-",
         dir=ascii_temp_root(),
         ignore_cleanup_errors=True,
     ) as tmp:
@@ -476,9 +476,9 @@ def workload_names(workload: str, names: list[str] | None) -> list[str]:
 
 def default_engines(workload: str) -> list[str]:
     if workload == "alpha158":
-        return ["qfactors", "qlib"]
+        return ["qweave", "qlib"]
     if workload == "worldquant101":
-        return ["qfactors", "kunquant"]
+        return ["qweave", "kunquant"]
     raise ValueError(f"unknown workload: {workload}")
 
 
@@ -491,8 +491,8 @@ def run_benchmarks(args: argparse.Namespace) -> list[BenchResult]:
     results: list[BenchResult] = []
 
     for engine in engines:
-        if engine == "qfactors":
-            call = lambda: run_qfactors(df, args.workload, selected or None)
+        if engine == "qweave":
+            call = lambda: run_qweave(df, args.workload, selected or None)
             try:
                 times, output = measure(call, args.repeats, args.warmups)
                 results.append(summarize(engine, args.workload, df.height, factor_count, times, output))
@@ -539,7 +539,7 @@ def run_benchmarks(args: argparse.Namespace) -> list[BenchResult]:
                 )
                 continue
             try:
-                with tempfile.TemporaryDirectory(prefix="qf-qlib-") as tmp:
+                with tempfile.TemporaryDirectory(prefix="qweave-qlib-") as tmp:
                     provider_dir = Path(tmp)
                     instruments, start_time, end_time = write_qlib_provider(df, provider_dir)
                     call = lambda: run_qlib_alpha158_prepared(

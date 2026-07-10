@@ -1,4 +1,4 @@
-"""Synthetic benchmark for qfactors.evaluate / with_labels.
+"""Synthetic benchmark for qweave.evaluate / with_labels.
 
 Usage (build the extension in release mode first):
 
@@ -24,7 +24,7 @@ import time
 import numpy as np
 import polars as pl
 
-import qfactors
+import qweave
 
 HORIZONS = [1, 5, 10, 20]
 
@@ -55,7 +55,7 @@ def build_panel(n_symbols, n_days, n_factors, seed=0):
 
 def run_tier(name, df, factor_cols, output_dir=None):
     start = time.perf_counter()
-    result = qfactors.evaluate(
+    result = qweave.evaluate(
         df,
         symbol_col="asset",
         time_col="time",
@@ -76,7 +76,7 @@ def run_tier(name, df, factor_cols, output_dir=None):
 def bench_with_labels(df):
     df = df.drop([c for c in df.columns if c.startswith("ret_")])
     start = time.perf_counter()
-    out = qfactors.with_labels(
+    out = qweave.with_labels(
         df,
         symbol_col="asset",
         time_col="time",
@@ -103,7 +103,7 @@ def main():
         n_factors = args.factors or 1
         print(f"building panel {n_symbols} x {n_days}, {n_factors} factors ...")
         df = build_panel(n_symbols, n_days, n_factors)
-        output_dir = tempfile.mkdtemp(prefix="qf-bench-") if args.streaming else None
+        output_dir = tempfile.mkdtemp(prefix="qweave-bench-") if args.streaming else None
         run_tier("custom", df, [f"f{i}" for i in range(n_factors)], output_dir)
         return
 
@@ -119,7 +119,7 @@ def main():
     print("building reduced panel (1000 x 600, 1024 factors) ...")
     df = build_panel(1000, 600, 1024)
     run_tier("reduced panel", df, [f"f{i}" for i in range(158)])
-    with tempfile.TemporaryDirectory(prefix="qf-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="qweave-bench-") as tmp:
         run_tier("reduced panel", df, [f"f{i}" for i in range(1024)], output_dir=tmp)
 
 

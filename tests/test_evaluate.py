@@ -4,7 +4,7 @@ import random
 import numpy as np
 import polars as pl
 import pytest
-import qfactors
+import qweave
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +191,7 @@ def make_panel(seed, n_assets=8, n_days=30, nan_rate=0.10):
 
 
 def run_evaluate(df, factor_cols, **kwargs):
-    return qfactors.evaluate(
+    return qweave.evaluate(
         df,
         symbol_col="asset",
         time_col="time",
@@ -546,10 +546,10 @@ def test_alpha101_end_to_end():
             )
     df = pl.DataFrame(rows)
 
-    df = qfactors.with_alphas(
-        df, symbol_col="asset", time_col="time", alphas=qfactors.worldquant_alpha101({})
+    df = qweave.with_alphas(
+        df, symbol_col="asset", time_col="time", alphas=qweave.worldquant_alpha101({})
     )
-    df = qfactors.with_labels(df, symbol_col="asset", time_col="time", horizons=[1, 5])
+    df = qweave.with_labels(df, symbol_col="asset", time_col="time", horizons=[1, 5])
     result = run_evaluate(
         df,
         [f"alpha{i}" for i in range(1, 102)],
@@ -568,13 +568,13 @@ def test_factor_source_matches_in_frame(tmp_path):
     # instead of from the (label-only) frame.
     df = make_panel(71, nan_rate=0.0)
     alpha_out = tmp_path / "alphas.parquet"
-    qfactors.compute_alphas(
+    qweave.compute_alphas(
         df.select(["asset", "time", "f1", "f2"]).rename({"f1": "close", "f2": "open"}),
         symbol_col="asset",
         time_col="time",
         alphas=[
-            qfactors.col("close").alias("a1"),
-            (qfactors.col("close") - qfactors.col("open")).alias("a2"),
+            qweave.col("close").alias("a1"),
+            (qweave.col("close") - qweave.col("open")).alias("a2"),
         ],
         output_path=str(alpha_out),
     )
@@ -587,7 +587,7 @@ def test_factor_source_matches_in_frame(tmp_path):
     baseline = run_evaluate(in_frame_df, ["a1", "a2"], quantiles=4, min_cs_count=4)
 
     labels_only = df.drop(["f1", "f2"])
-    sourced = qfactors.evaluate(
+    sourced = qweave.evaluate(
         labels_only,
         symbol_col="asset",
         time_col="time",
@@ -603,7 +603,7 @@ def test_factor_source_matches_in_frame(tmp_path):
 
     # A mismatched panel is rejected.
     with pytest.raises(ValueError, match="does not match"):
-        qfactors.evaluate(
+        qweave.evaluate(
             labels_only.head(labels_only.height - 4),
             symbol_col="asset",
             time_col="time",
