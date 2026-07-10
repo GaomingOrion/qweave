@@ -2,8 +2,9 @@
 
 [English](expression_api.en.md)
 
-qweave 提供 eager expression API，用于快速构造和执行 alpha 表达式。表达式是
-Python 对象，底层由 Rust `Expr` 树表示；执行器会立即计算表达式列表。
+qweave 提供 eager expression API，用于快速构造和执行 alpha 表达式。你写的是
+普通 Python 表达式，底层是 Rust `Expr` 树；执行时可以把一批表达式一起交给 DAG
+evaluator，而不是在 Python 里一列一列循环。
 
 ## 构造表达式
 
@@ -47,6 +48,11 @@ out = qf.compute_alphas(df, "asset", "time", [intraday_return])
 `compute_alphas(..., output_path="alphas.parquet")` 会写出完整结果并返回摘要。
 `with_alphas` 每个表达式会分配一个完整输出 buffer，再 scatter 回输入行序；大批量
 因子且不需要保留原始 shape 时，优先使用 `compute_alphas`。
+
+经验上可以这样选：
+
+- notebook 探索、希望保留原始列：用 `with_alphas`。
+- 批量因子产出、准备落盘或后续评估：用 `compute_alphas`。
 
 ## 复用模板
 

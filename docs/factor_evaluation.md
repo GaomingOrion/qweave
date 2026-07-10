@@ -197,15 +197,6 @@ streaming `output_dir` 可通过 CLI 打开：
 cargo run -p qweave-server -- --dir <output_dir> --open
 ```
 
-构建 Python wheel 前需要先构建前端：
-
-```powershell
-Set-Location frontend
-npm install
-npm run build
-Set-Location ..
-```
-
 ## `factor_correlation`
 
 ```python
@@ -228,8 +219,6 @@ corr = qf.factor_correlation(
 1. Rust 小面板手算单测锁定精确值。
 2. `tests/test_evaluate.py` 和 `tests/test_flows.py` 用独立 NumPy reference 重新
    推导各项指标，并覆盖 NaN、ties、tradable mask、streaming vs memory 等场景。
-3. `scripts/compare_alphalens.py` 是 dev-only cross-check，用于和
-   alphalens-reloaded 在匹配配置上对照。
 
 与 alphalens 的差异是有意设计：Newey-West t-stat、确定性 rank bucketing、
 显式 `entry_lag`、tradable mask、同时报告 Pearson IC 和 Spearman RankIC，以及不

@@ -2,8 +2,12 @@
 
 [English](worldquant_alpha101.en.md)
 
-qweave 将 `alpha1` 到 `alpha101` 构造成内置 alpha 表达式。实现参考
-Kakushadze 的 "101 Formulaic Alphas" 附录 A，并在本文记录项目自己的默认口径。
+qweave 将 `alpha1` 到 `alpha101` 构造成内置 alpha 表达式。你可以像使用自定义
+表达式一样筛选、组合和字段映射这些 alpha，然后把它们与自己的因子一起批量提交给
+Rust evaluator。
+
+实现参考 Kakushadze 的 "101 Formulaic Alphas" 附录 A，并在本文记录项目自己的
+默认口径。
 
 本项目与 WorldQuant 没有关联。
 
@@ -45,8 +49,8 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 - Tier B：Tier A 加上公式引用的 `vwap` 或 `cap`；`adv{d}` 从 `volume` 派生。
 - Tier C：需要数值型分组字段 `sector`、`industry` 或 `subindustry`。
 
-详细实现 manifest 保存在
-[docs/plans/worldquant101_manifest.md](plans/worldquant101_manifest.md)。
+如果只使用基础 OHLCV 数据，可以先选择 Tier A alpha；数据中包含 `vwap`、`cap` 或
+行业分类后，再逐步打开 Tier B/Tier C。
 
 ## 验证
 

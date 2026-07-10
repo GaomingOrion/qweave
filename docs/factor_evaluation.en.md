@@ -200,15 +200,6 @@ For streamed output:
 cargo run -p qweave-server -- --dir <output_dir> --open
 ```
 
-Build the frontend before building a Python wheel:
-
-```powershell
-Set-Location frontend
-npm install
-npm run build
-Set-Location ..
-```
-
 ## `factor_correlation`
 
 ```python
@@ -231,8 +222,6 @@ not thousands of raw factors.
 1. Rust unit tests lock exact values on small panels.
 2. `tests/test_evaluate.py` and `tests/test_flows.py` rederive metrics with an
    independent NumPy reference.
-3. `scripts/compare_alphalens.py` is a dev-only cross-check against
-   alphalens-reloaded on matched configurations.
 
 Intentional divergences from alphalens include Newey-West t-stats,
 deterministic rank bucketing, explicit `entry_lag`, a tradable mask, Pearson IC

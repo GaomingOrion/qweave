@@ -2,48 +2,114 @@
 
 [Chinese](README.md)
 
-qweave is a Rust-powered quantitative research workflow toolkit with Python
-bindings for Polars panels. The current implementation covers factor and alpha
-computation, forward-return labels, factor evaluation, and interactive reports.
-The broader direction is an end-to-end workflow for factor research,
-quantitative modeling, strategy construction, and backtesting.
+qweave is a **Rust + Polars factor workflow toolkit** for quantitative research.
+It puts alpha expressions, batch factor computation, forward-return labels,
+IC/RankIC evaluation, quantile returns, and interactive reports into one Python
+DataFrame pipeline so researchers can move from an idea to comparable results
+with less glue code.
 
-The project is pre-1.0. The APIs are usable for research and internal workflows,
-but they may still change.
+The project currently focuses on factor processing and factor evaluation, with
+quantitative modeling, strategy construction, and backtesting planned next. The
+API is pre-1.0, but it is already useful for local research and internal
+workflows.
 
-## Why qweave
+## Why It Is Interesting
 
-- **Polars-native workflow:** pass in a Polars DataFrame and get a Polars
-  DataFrame back. `with_alphas` appends results in original row order;
-  `compute_alphas` emits a full `(time, symbol)` panel.
-- **Rust execution core:** panel sorting, validation, rolling windows,
-  cross-sectional operators, and expression evaluation run in Rust.
-- **Expression API:** compose alphas with `qweave.col("close")`,
-  `qweave.lit(1.0)`, operators, windows, ranks, neutralization, and
-  `replace_inputs()` templates.
-- **Built-in factor libraries:** WorldQuant 101 and Qlib Alpha158 are exposed as
-  expression builders with documented defaults and input aliasing.
-- **Regression guarded:** built-in alphas are checked against frozen synthetic
-  golden fixtures.
-- **Factor evaluation:** labels, IC / RankIC, quantile returns, turnover,
-  long-short diagnostics, factor correlation, HTML reports, and interactive
-  reports are available. This surface is still experimental.
+- **One DataFrame pipeline:** pass in a Polars DataFrame, append alphas, labels,
+  and evaluation results without bouncing between factor matrices, label
+  matrices, and analysis tables.
+- **Rust hot path:** panel sorting, validation, rolling windows,
+  cross-sectional operators, expression DAG evaluation, and evaluation
+  statistics run on the Rust side. Python mostly orchestrates.
+- **Batch expression execution:** the default DAG evaluator reuses common
+  subexpressions, reuses intermediate slots, and fuses elementwise chains, which
+  is useful when computing hundreds of overlapping alphas at once.
+- **Reusable built-in factor libraries:** `worldquant_alpha101()` and
+  `qlib_alpha158()` return normal expression objects. You can select subsets,
+  remap inputs, and mix them with custom expressions.
+- **Explicit research calibers:** forward returns, tradable samples, quantile
+  binning, demeaning, turnover, and long-short diagnostics have documented
+  defaults.
+- **Reproducible performance story:** the repository includes synthetic-panel
+  benchmarks for qweave, Qlib Alpha158, and KunQuant Alpha101 paths. Historical
+  macOS numbers were removed; current claims should be re-measured in the
+  Windows/PowerShell environment.
 
-## Roadmap
+## Relationship To Qlib And KunQuant
 
-**Done**
+qweave is not trying to clone all of Qlib, and it is not a drop-in replacement
+for KunQuant's JIT compiler. It is a lightweight, fast, Polars-native factor
+research kernel that can be used directly or embedded into a larger platform.
 
-- WorldQuant 101 and Qlib Alpha158 expression libraries.
-- Python expression API: `PyExpr`, `with_alphas`, `compute_alphas`, input
-  replacement, and type stubs.
-- DAG alpha evaluator as the default engine.
-- Initial factor evaluation workflow and reports.
+| Project | Strength | qweave focus |
+| --- | --- | --- |
+| Qlib | Full AI quant platform covering data, models, portfolios, backtesting, and execution workflows | Lighter factor-computation and evaluation kernel that plugs directly into existing Polars DataFrames |
+| KunQuant | Compiles expression batches into optimized C++/JIT execution paths | Avoids user-managed C++/JIT lifecycle and emphasizes Python ergonomics, Rust kernels, and the evaluation loop |
+| pandas/Alphalens-style tools | Interactive analysis and traditional DataFrame workflows | Keeps factor processing, labels, and evaluation in one Rust/Polars pipeline, reducing Python loops on large panels |
 
-**Planned**
+See [Comparison](docs/comparison.en.md) for positioning and
+[Benchmarks](docs/benchmark.en.md) for reproducible measurements.
 
-- Quantitative modeling, strategy construction, and backtesting modules.
-- More complete factor and alpha API documentation.
-- Publication to PyPI and crates.io.
+## Quick Start
+
+```python
+import polars as pl
+import qweave as qf
+
+df = pl.DataFrame(
+    {
+        "asset": ["A", "A", "B", "B"],
+        "time": [1, 2, 1, 2],
+        "open": [10.0, 11.0, 20.0, 19.0],
+        "close": [11.0, 12.0, 19.0, 21.0],
+        "high": [12.0, 13.0, 21.0, 22.0],
+        "low": [9.0, 10.0, 18.0, 18.5],
+        "volume": [100.0, 120.0, 80.0, 90.0],
+        "tradable": [True, True, True, True],
+    }
+)
+
+alphas = [
+    (
+        (qf.col("close") - qf.col("open"))
+        / (qf.col("high") - qf.col("low") + qf.lit(0.001))
+    ).alias("intraday_return")
+]
+
+df = qf.with_alphas(df, "asset", "time", alphas)
+df = qf.with_labels(
+    df,
+    symbol_col="asset",
+    time_col="time",
+    horizons=[1],
+    entry_lag=0,
+    entry_col="close",
+    exit_col="close",
+    tradable_col="tradable",
+)
+
+result = qf.evaluate(
+    df,
+    symbol_col="asset",
+    time_col="time",
+    factor_cols=["intraday_return"],
+    quantiles=2,
+    min_cs_count=2,
+    tradable_col="tradable_entry",
+)
+
+print(result.summary)
+```
+
+Compute built-in factors in bulk:
+
+```python
+alphas = qf.worldquant_alpha101({}, alphas=["alpha13", "alpha101"])
+out = qf.compute_alphas(df, "asset", "time", alphas)
+```
+
+`with_alphas` appends factor columns in original input row order.
+`compute_alphas` emits a full `(time, symbol)` panel and can write Parquet.
 
 ## Installation
 
@@ -64,44 +130,25 @@ uv run maturin develop
 The repository includes `rust-toolchain.toml`, so Cargo uses the pinned nightly
 toolchain automatically.
 
-## Quick Start
+## Capability Map
 
-```python
-import polars as pl
-import qweave
+**Available today**
 
-df = pl.DataFrame(
-    {
-        "asset": ["A", "A", "B", "B"],
-        "time": [1, 2, 1, 2],
-        "open": [10.0, 11.0, 20.0, 19.0],
-        "close": [11.0, 12.0, 19.0, 21.0],
-        "high": [12.0, 13.0, 21.0, 22.0],
-        "low": [9.0, 10.0, 18.0, 18.5],
-        "volume": [100.0, 120.0, 80.0, 90.0],
-    }
-)
+- WorldQuant 101 and Qlib Alpha158 expression libraries.
+- Python expression API: `col`, `lit`, arithmetic/comparison operators, rolling
+  windows, ranks, neutralization, and `replace_inputs()`.
+- `compute_alphas` and `with_alphas` for batch alpha output and input-frame
+  augmentation.
+- DAG alpha evaluator with common-subexpression reuse, slot reuse, node-level
+  parallelism, and fused elementwise chains.
+- `with_labels`, `evaluate`, `factor_correlation`, HTML reports, and
+  interactive reports.
 
-alphas = qweave.worldquant_alpha101({}, alphas=["alpha101"])
-out = qweave.compute_alphas(
-    df=df,
-    symbol_col="asset",
-    time_col="time",
-    alphas=alphas,
-)
+**Planned**
 
-df_with_alpha = qweave.with_alphas(
-    df=df,
-    symbol_col="asset",
-    time_col="time",
-    alphas=[
-        (
-            (qweave.col("close") - qweave.col("open"))
-            / (qweave.col("high") - qweave.col("low") + qweave.lit(0.001))
-        ).alias("intraday_return")
-    ],
-)
-```
+- Quantitative modeling, strategy construction, and backtesting modules.
+- More complete API references and example datasets.
+- Publication to PyPI and crates.io.
 
 ## Public API
 
@@ -114,26 +161,34 @@ df_with_alpha = qweave.with_alphas(
 - `qweave.factor_correlation(...)`, `EvalResult.to_html(...)`,
   `EvalResult.view()`
 
-## Alpha Engine
+Input rules:
 
-`compute_alphas` uses the DAG evaluator by default. The tree evaluator can be
-selected as an independent reference implementation:
-
-```powershell
-$env:QWEAVE_ENGINE = "tree"
-uv run python -m pytest
-Remove-Item Env:\QWEAVE_ENGINE
-```
+- `symbol_col` and `time_col` cannot contain nulls.
+- Structural columns cannot contain NaN.
+- Nulls in floating input columns are converted to NaN so factor logic can
+  propagate missing values naturally.
+- The engine sorts by `(symbol_col, time_col)` and rejects duplicate
+  symbol-time rows.
+- Field remapping lives in the expression tree through `PyExpr.replace_inputs()`
+  or the built-in libraries' `input_alias` argument.
 
 ## Documentation
 
-- [Architecture](docs/architecture.en.md)
-- [Development](docs/development.en.md)
+For GitHub readers:
+
+- [Comparison](docs/comparison.en.md)
+- [Performance and Benchmarks](docs/benchmark.en.md)
+- [Architecture and Design Tradeoffs](docs/architecture.en.md)
 - [Python Expression API](docs/expression_api.en.md)
 - [Factor Evaluation](docs/factor_evaluation.en.md)
 - [WorldQuant 101](docs/worldquant_alpha101.en.md)
 - [Qlib Alpha158](docs/qlib_alpha158.en.md)
-- [Benchmarks](docs/benchmark.en.md)
+
+For maintainers:
+
+- [Development Guide](docs/development.en.md)
+
+This project is not affiliated with WorldQuant, Microsoft, Qlib, or KunQuant.
 
 ## Development Checks
 
@@ -145,6 +200,8 @@ cargo test --workspace
 uv run maturin develop
 uv run python -m pytest
 ```
+
+See the [Development Guide](docs/development.en.md) for details.
 
 ## License
 

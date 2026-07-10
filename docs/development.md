@@ -1,6 +1,9 @@
-# 开发
+# 开发者手册
 
 [English](development.en.md)
+
+本文是维护者入口，面向要修改 qweave 源码的人。用户能力、对比和 benchmark 解释见
+[README](../README.md)、[项目对比](comparison.md) 和 [性能与基准测试](benchmark.md)。
 
 ## 环境
 
@@ -11,12 +14,10 @@ uv sync --dev
 uv run maturin develop
 ```
 
-Rust toolchain 由 `rust-toolchain.toml` 固定。Cargo 会在需要时自动安装或使用
-配置好的 nightly toolchain。
+Rust toolchain 由 `rust-toolchain.toml` 固定。Cargo 会在需要时自动安装或使用配置好
+的 nightly toolchain。
 
-## 检查
-
-提交前运行：
+## 提交前检查
 
 ```powershell
 cargo fmt --check
@@ -27,18 +28,18 @@ uv run maturin develop
 uv run python -m pytest
 ```
 
-`cargo test --workspace` 会运行 Rust 单测和集成测试。首次运行可能需要几分钟，
-因为 Polars 和 PyO3 依赖需要从源码编译。
+`cargo test --workspace` 会运行 Rust 单测和集成测试。首次运行可能需要几分钟，因为
+Polars 和 PyO3 依赖需要从源码编译。
 
-在当前 Windows 环境里，如果 workspace 测试二进制需要加载 Python DLL，可以把
-uv 管理的 Python 安装目录临时加入 `PATH` 后再运行测试。
+在当前 Windows 环境里，如果 workspace 测试二进制需要加载 Python DLL，可以把 uv
+管理的 Python 安装目录临时加入 `PATH` 后再运行测试。
 
 ## Python 扩展
 
-`uv run maturin develop` 会构建并安装本地扩展模块到项目环境。修改
-`qweave-py` 使用到的 Rust 代码后，需要重新运行该命令。
+`uv run maturin develop` 会构建并安装本地扩展模块到项目环境。修改 `qweave-py`
+使用到的 Rust 代码后，需要重新运行该命令。
 
-## Benchmarks
+## 本地 benchmark
 
 合成 alpha benchmark 是 ignored Rust test：
 
@@ -60,9 +61,9 @@ cargo test -p qweave-factors all_alphas_golden_matches_frozen_baseline
 Remove-Item Env:\QWEAVE_ENGINE
 ```
 
-跨引擎 benchmark 的说明见 [基准测试文档](benchmark.md)。
+跨引擎 benchmark 的公开复现命令见 [性能与基准测试](benchmark.md)。
 
-## Golden Fixtures
+## Golden fixtures
 
-仓库中的 Parquet golden fixture 是合成数据。只有当实现变更确实改变预期输出时
+仓库中的 Parquet golden fixtures 使用合成数据。只有当实现变更确实改变预期输出时
 才更新 fixture；更新时必须 review diff，并在提交或 PR 中说明原因。

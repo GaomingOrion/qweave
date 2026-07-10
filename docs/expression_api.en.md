@@ -2,9 +2,9 @@
 
 [Chinese](expression_api.md)
 
-qweave 0.3 introduces an eager expression API for alpha research. Expressions
-are plain Python objects backed by the Rust `Expr` tree; executors evaluate a
-list of expressions immediately.
+qweave provides an eager expression API for alpha research. You write normal
+Python expressions backed by a Rust `Expr` tree; execution can submit a batch to
+the DAG evaluator instead of looping one column at a time in Python.
 
 ## Construct Expressions
 
@@ -55,6 +55,13 @@ for a later release.
 buffer per expression and scattering evaluated `(time, symbol)` values back into
 input order before appending the columns. For large batches, prefer
 `compute_alphas` when you do not need to keep the original DataFrame shape.
+
+As a rule of thumb:
+
+- Use `with_alphas` for notebook exploration or when you want to preserve the
+  original columns.
+- Use `compute_alphas` for batch factor output, Parquet export, or downstream
+  evaluation.
 
 ## Reuse Templates
 

@@ -2,9 +2,12 @@
 
 [Chinese](worldquant_alpha101.md)
 
-qweave builds `alpha1` through `alpha101` as built-in alpha expressions. The
-implementation follows the formula set from Kakushadze, "101 Formulaic Alphas",
-Appendix A, with project-specific defaults documented here.
+qweave builds `alpha1` through `alpha101` as built-in alpha expressions. You can
+select, compose, and remap these alphas the same way you would handle custom
+expressions, then batch-submit them to the Rust evaluator with your own factors.
+
+The implementation follows the formula set from Kakushadze, "101 Formulaic
+Alphas", Appendix A, with project-specific defaults documented here.
 
 This project is not affiliated with WorldQuant.
 
@@ -49,8 +52,8 @@ For custom expressions, see [Python Expression API](expression_api.en.md).
 - Tier C: numeric group classification columns: `sector`, `industry`, or
   `subindustry`.
 
-The detailed implementation manifest is kept in
-[docs/plans/worldquant101_manifest.md](plans/worldquant101_manifest.md).
+If you only have basic OHLCV data, start with Tier A alphas. Add Tier B/Tier C
+once your data includes `vwap`, `cap`, or industry classifications.
 
 ## Verification
 

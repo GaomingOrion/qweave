@@ -1,6 +1,11 @@
-# Development
+# Development Guide
 
 [Chinese](development.md)
+
+This is the maintainer entry point for people changing qweave source code. For
+user-facing capabilities, positioning, and benchmark interpretation, see the
+[README](../README.en.md), [Comparison](comparison.en.md), and
+[Performance And Benchmarks](benchmark.en.md).
 
 ## Environment
 
@@ -11,12 +16,10 @@ uv sync --dev
 uv run maturin develop
 ```
 
-The Rust toolchain is pinned by `rust-toolchain.toml`. Cargo will install/use
+The Rust toolchain is pinned by `rust-toolchain.toml`. Cargo will install or use
 the configured nightly toolchain when needed.
 
-## Checks
-
-Run these before committing:
+## Pre-Commit Checks
 
 ```powershell
 cargo fmt --check
@@ -27,8 +30,8 @@ uv run maturin develop
 uv run python -m pytest
 ```
 
-`cargo test --workspace` runs the Rust unit and integration tests. The first run
-can take several minutes because Polars and PyO3 dependencies are compiled from
+`cargo test --workspace` runs Rust unit and integration tests. The first run can
+take several minutes because Polars and PyO3 dependencies are compiled from
 source.
 
 ## Python Extension
@@ -36,7 +39,7 @@ source.
 `uv run maturin develop` builds and installs the local extension module into the
 project environment. Re-run it after changing Rust code used by `qweave-py`.
 
-## Benchmarks
+## Local Benchmarks
 
 The synthetic alpha benchmark is an ignored Rust test:
 
@@ -50,15 +53,19 @@ Benchmark dimensions can be adjusted with:
 - `QWEAVE_BENCH_TIMES`
 - `QWEAVE_BENCH_REPEATS`
 
-To compare alpha engines locally, set `QWEAVE_ENGINE=tree` or `QWEAVE_ENGINE=dag`.
+To compare alpha engines locally:
 
-### Cross-engine factor benchmarks
+```powershell
+$env:QWEAVE_ENGINE = "tree"  # or "dag"
+cargo test -p qweave-factors all_alphas_golden_matches_frozen_baseline
+Remove-Item Env:\QWEAVE_ENGINE
+```
 
-See [benchmarks](benchmark.md) for cross-engine benchmark commands and recorded
-results against Qlib Alpha158 and KunQuant WorldQuant101.
+For public cross-engine reproduction commands, see
+[Performance And Benchmarks](benchmark.en.md).
 
 ## Golden Fixtures
 
-The checked-in Parquet fixture for all-alphas regression coverage is synthetic.
-Only update it when an intentional implementation change alters expected output.
-Review the diff and mention the reason in the commit or pull request.
+The checked-in Parquet golden fixtures use synthetic data. Only update them when
+an intentional implementation change alters expected output. Review the diff and
+mention the reason in the commit or pull request.

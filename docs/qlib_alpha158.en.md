@@ -3,8 +3,12 @@
 [Chinese](qlib_alpha158.md)
 
 qweave builds the Microsoft Qlib `Alpha158` feature set as 158 built-in alpha
-expressions. The formulas follow Qlib's `Alpha158` handler; project-specific
-calibers are documented here.
+expressions. It is useful as a baseline feature set for research pipelines: it
+has a small input surface, a clear structure, broad rolling-kernel coverage, and
+an obvious reference point against the Qlib handler.
+
+The formulas follow Qlib's `Alpha158` handler; project-specific calibers are
+documented here.
 
 This project is not affiliated with Microsoft or Qlib.
 

@@ -3,6 +3,9 @@
 [English](qlib_alpha158.en.md)
 
 qweave 将 Microsoft Qlib 的 `Alpha158` 特征集构造成 158 个内置 alpha 表达式。
+它适合用作研究 pipeline 的基准特征集：输入字段少、结构清楚、计算路径覆盖大量
+rolling kernel，也便于和 Qlib handler 做口径对照。
+
 公式参考 Qlib `Alpha158` handler；项目差异口径记录在本文。
 
 本项目与 Microsoft 或 Qlib 没有关联。
