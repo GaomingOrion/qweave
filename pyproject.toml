@@ -5,13 +5,22 @@ build-backend = "maturin"
 [project]
 name = "qweave"
 version = "0.4.1"
-description = "Rust-powered quantitative research workflow toolkit"
-readme = "README.md"
+description = "Polars-native factor research engine powered by Rust"
+readme = "README.en.md"
 license = { text = "MIT" }
-authors = [{ name = "zer0quant contributors" }]
+authors = [{ name = "GaomingOrion" }]
 requires-python = ">=3.10"
 dependencies = ["polars>=1.0"]
-keywords = ["quant", "factors", "polars", "finance"]
+keywords = [
+    "quantitative-finance",
+    "factor-research",
+    "alpha101",
+    "alpha158",
+    "factor-analysis",
+    "polars",
+    "rust",
+    "pyo3",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -26,6 +35,9 @@ classifiers = [
 Homepage = "https://github.com/GaomingOrion/qweave"
 Repository = "https://github.com/GaomingOrion/qweave"
 Issues = "https://github.com/GaomingOrion/qweave/issues"
+Documentation = "https://github.com/GaomingOrion/qweave/blob/master/docs/index.en.md"
+Changelog = "https://github.com/GaomingOrion/qweave/blob/master/CHANGELOG.md"
+Releases = "https://github.com/GaomingOrion/qweave/releases"
 
 [dependency-groups]
 dev = [

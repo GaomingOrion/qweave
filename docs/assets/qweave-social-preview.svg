@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">qweave social preview</title>
+  <desc id="desc">qweave, factor research at Rust speed without leaving Polars.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#061321"/>
+      <stop offset="0.58" stop-color="#0a2338"/>
+      <stop offset="1" stop-color="#0d3445"/>
+    </linearGradient>
+    <linearGradient id="weave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4fd7ff"/>
+      <stop offset="1" stop-color="#7cf0bd"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="12" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <circle cx="1120" cy="110" r="250" fill="#3ad2ff" opacity="0.06"/>
+  <circle cx="120" cy="620" r="290" fill="#62efb5" opacity="0.05"/>
+  <g fill="none" stroke="url(#weave)" stroke-width="4" filter="url(#glow)" opacity="0.82">
+    <path d="M720 170 C860 70 965 270 1120 170 S1300 135 1380 205"/>
+    <path d="M720 245 C860 145 965 345 1120 245 S1300 210 1380 280" opacity="0.65"/>
+    <path d="M720 320 C860 220 965 420 1120 320 S1300 285 1380 355" opacity="0.45"/>
+    <path d="M720 395 C860 295 965 495 1120 395 S1300 360 1380 430" opacity="0.3"/>
+  </g>
+  <text x="88" y="188" fill="#7cf0bd" font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="700" letter-spacing="5">POLARS × RUST</text>
+  <text x="82" y="310" fill="#f5fbff" font-family="Segoe UI, Arial, sans-serif" font-size="108" font-weight="760">qweave</text>
+  <text x="88" y="388" fill="#d8e9f2" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="600">Factor research at Rust speed,</text>
+  <text x="88" y="435" fill="#d8e9f2" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="600">without leaving Polars.</text>
+  <g transform="translate(88 510)" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#9eb8c9">
+    <text x="0" y="0">Alpha101</text><circle cx="121" cy="-7" r="3" fill="#54d7ff"/>
+    <text x="142" y="0">Alpha158</text><circle cx="261" cy="-7" r="3" fill="#54d7ff"/>
+    <text x="282" y="0">Leakage-aware evaluation</text><circle cx="530" cy="-7" r="3" fill="#54d7ff"/>
+    <text x="551" y="0">Interactive reports</text>
+  </g>
+</svg>

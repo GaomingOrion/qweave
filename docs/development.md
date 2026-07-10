@@ -39,6 +39,27 @@ Polars 和 PyO3 依赖需要从源码编译。
 `uv run maturin develop` 会构建并安装本地扩展模块到项目环境。修改 `qweave-py`
 使用到的 Rust 代码后，需要重新运行该命令。
 
+## 发布与 PyPI
+
+`.github/workflows/release.yml` 在版本 tag 上构建 Windows、Linux 和 macOS 的
+CPython 3.10+ stable ABI wheels，并对所有原生 runner 执行
+`scripts/smoke_wheel.py`。Linux aarch64 wheel 是交叉编译产物，不在 x86_64 runner
+上执行。
+
+PyPI 使用 Trusted Publishing，不在仓库保存 token。首次发布前，维护者需要在 PyPI
+为 `qweave` 配置以下 publisher：
+
+```text
+Owner: GaomingOrion
+Repository: qweave
+Workflow: release.yml
+Environment: pypi
+```
+
+配置完成后，新的版本 tag 会在 GitHub Release 成功构建同一组分发文件，并由
+`publish-pypi` job 上传到 PyPI。发布前仍需按仓库规则更新版本、Changelog 和 release
+notes。
+
 ## 本地 benchmark
 
 合成 alpha benchmark 是 ignored Rust test：

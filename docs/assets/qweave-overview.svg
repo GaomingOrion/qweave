@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">qweave factor research pipeline</title>
+  <desc id="desc">Market data flows through a Rust expression DAG, leakage-aware labels, factor evaluation, and an interactive report.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071525"/>
+      <stop offset="1" stop-color="#0d2940"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#54d7ff"/>
+      <stop offset="1" stop-color="#7cf0bd"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#00101d" flood-opacity="0.45"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#54d7ff"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="420" rx="28" fill="url(#bg)"/>
+  <text x="64" y="72" fill="#f4fbff" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="700">One Polars DataFrame pipeline</text>
+  <text x="64" y="108" fill="#9eb8c9" font-family="Segoe UI, Arial, sans-serif" font-size="18">From market data to a factor report, with the expensive research loop in Rust</text>
+  <g filter="url(#shadow)" font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(64 156)">
+      <rect width="208" height="174" rx="18" fill="#102f48" stroke="#23506c"/>
+      <text x="24" y="42" fill="#7cf0bd" font-size="14" font-weight="700">INPUT</text>
+      <text x="24" y="78" fill="#f4fbff" font-size="23" font-weight="650">Polars panel</text>
+      <text x="24" y="112" fill="#9eb8c9" font-size="15">OHLCV · tradability</text>
+      <text x="24" y="138" fill="#9eb8c9" font-size="15">industry · your fields</text>
+    </g>
+    <g transform="translate(314 156)">
+      <rect width="208" height="174" rx="18" fill="#102f48" stroke="#23506c"/>
+      <text x="24" y="42" fill="#54d7ff" font-size="14" font-weight="700">COMPUTE</text>
+      <text x="24" y="78" fill="#f4fbff" font-size="23" font-weight="650">Rust DAG</text>
+      <text x="24" y="112" fill="#9eb8c9" font-size="15">custom · Alpha101</text>
+      <text x="24" y="138" fill="#9eb8c9" font-size="15">Alpha158 · batch reuse</text>
+    </g>
+    <g transform="translate(564 156)">
+      <rect width="208" height="174" rx="18" fill="#102f48" stroke="#23506c"/>
+      <text x="24" y="42" fill="#54d7ff" font-size="14" font-weight="700">LABEL</text>
+      <text x="24" y="78" fill="#f4fbff" font-size="23" font-weight="650">Forward returns</text>
+      <text x="24" y="112" fill="#9eb8c9" font-size="15">union calendar</text>
+      <text x="24" y="138" fill="#9eb8c9" font-size="15">entry lag · tradability</text>
+    </g>
+    <g transform="translate(814 156)">
+      <rect width="208" height="174" rx="18" fill="#102f48" stroke="#23506c"/>
+      <text x="24" y="42" fill="#54d7ff" font-size="14" font-weight="700">EVALUATE</text>
+      <text x="24" y="78" fill="#f4fbff" font-size="23" font-weight="650">Factor diagnostics</text>
+      <text x="24" y="112" fill="#9eb8c9" font-size="15">IC · quantiles · turnover</text>
+      <text x="24" y="138" fill="#9eb8c9" font-size="15">long-short · Newey–West</text>
+    </g>
+    <g transform="translate(1064 156)">
+      <rect width="152" height="174" rx="18" fill="#123c51" stroke="#54d7ff"/>
+      <text x="20" y="42" fill="#7cf0bd" font-size="14" font-weight="700">EXPLORE</text>
+      <text x="20" y="78" fill="#f4fbff" font-size="23" font-weight="650">Report</text>
+      <text x="20" y="112" fill="#9eb8c9" font-size="15">standalone HTML</text>
+      <text x="20" y="138" fill="#9eb8c9" font-size="15">interactive drill-down</text>
+    </g>
+  </g>
+  <g stroke="url(#line)" stroke-width="3" fill="none" marker-end="url(#arrow)">
+    <path d="M276 243 H306"/>
+    <path d="M526 243 H556"/>
+    <path d="M776 243 H806"/>
+    <path d="M1026 243 H1056"/>
+  </g>
+  <path d="M64 374 C250 338 330 410 520 374 S790 338 978 374 S1120 406 1216 374" fill="none" stroke="#54d7ff" stroke-opacity="0.28" stroke-width="2"/>
+  <path d="M64 388 C250 352 330 424 520 388 S790 352 978 388 S1120 420 1216 388" fill="none" stroke="#7cf0bd" stroke-opacity="0.22" stroke-width="2"/>
+</svg>

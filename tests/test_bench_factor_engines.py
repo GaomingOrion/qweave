@@ -72,3 +72,24 @@ def test_qlib_provider_writer_creates_minimal_binary_layout(tmp_path):
 def test_default_engines_follow_workload():
     assert bench.default_engines("alpha158") == ["qweave", "qlib"]
     assert bench.default_engines("worldquant101") == ["qweave", "kunquant"]
+
+
+def test_benchmark_defaults_use_large_panel():
+    args = bench.build_parser().parse_args([])
+
+    assert args.symbols == 5000
+    assert args.days == 1000
+
+
+def test_qweave_sequential_runs_one_factor_at_a_time():
+    df = bench.build_ohlcv_panel(4, 30, seed=23)
+
+    out = bench.run_qweave_sequential(
+        df,
+        "worldquant101",
+        names=["alpha13", "alpha101"],
+    )
+
+    assert out.columns == ["time", "asset", "alpha13", "alpha101"]
+    assert out.height == df.height
+    assert bench.process_peak_rss_mib() > 0

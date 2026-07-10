@@ -2,192 +2,175 @@
 
 [English](README.en.md)
 
-qweave 是一个面向量化研究的 **Rust + Polars 因子工作流工具包**。它把常见
-alpha 表达式、因子批量计算、forward-return 标签、IC/RankIC 评估、分位收益和
-交互式报告放进同一条 Python DataFrame pipeline，目标是让研究员少写胶水代码，
-更快完成从“想法”到“可比较结果”的闭环。
+[![CI](https://github.com/GaomingOrion/qweave/actions/workflows/ci.yml/badge.svg)](https://github.com/GaomingOrion/qweave/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/GaomingOrion/qweave)](https://github.com/GaomingOrion/qweave/releases)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/GaomingOrion/qweave)](LICENSE)
 
-项目当前聚焦因子加工与因子评估，正在向量化建模、策略构建和回测扩展。API 仍处
-于 pre-1.0 阶段，但已经适合本地研究实验和内部工作流试用。
+**Polars 原生、Rust 加速的因子研究引擎。** qweave 在一条 DataFrame pipeline 中
+完成可组合因子计算、无前视 forward-return 标签、IC/分位/换手评估和交互式报告。
 
-## 为什么值得看
+> 带上你自己的 Polars 行情面板。保留现有数据管线。把昂贵的因子研究循环交给 Rust。
 
-- **一条 DataFrame pipeline：** 传入 Polars DataFrame，追加 alpha、标签和评估
-  结果，不需要在因子矩阵、标签矩阵和分析表之间来回 join。
-- **Rust 热路径：** 面板排序、结构校验、滚动窗口、截面算子、表达式 DAG 求值和
-  评估统计都放在 Rust 侧执行，Python 主要负责编排。
-- **批量表达式执行：** 默认 DAG evaluator 会复用公共子表达式、复用中间 slot，
-  并融合 elementwise chain，适合一次性计算上百个相互重叠的 alpha。
-- **内置可复用因子库：** `worldquant_alpha101()` 和 `qlib_alpha158()` 返回普通
-  表达式对象，可以筛选子集、替换输入字段，也可以和自定义表达式混合执行。
-- **研究口径清楚：** forward return、可交易样本、分位分箱、去均值、换手和
-  long-short 诊断都有明确默认口径，避免“结果看起来不错但定义不清”的问题。
-- **性能可复现：** 仓库提供合成面板 benchmark，可直接比较 qweave、Qlib
-  Alpha158 和 KunQuant Alpha101 路径。历史 macOS 数字已移除，当前性能结论应在
-  Windows/PowerShell 环境重新测量后发布。
+![qweave 从行情面板到因子报告的完整流程](docs/assets/qweave-overview.svg)
 
-## 和 Qlib、KunQuant 的关系
+qweave 适合已经用 Parquet/Polars 管理数据，希望减少 Python 逐因子循环、重复 rolling
+计算和多张矩阵对齐工作的量化研究者。它聚焦“因子是否携带稳定未来收益信息”的研究
+层，不是数据供应商、撮合模拟器或完整投资平台。
 
-qweave 不是要复制整个 Qlib，也不是 KunQuant 的 JIT 编译器替代品。它更像一个
-轻量、高速、Polars 原生的因子研究内核，可以独立使用，也可以嵌入更大的研究平台。
+## 安装
 
-| 项目 | 更擅长 | qweave 的侧重点 |
-| --- | --- | --- |
-| Qlib | 完整 AI 量化平台，覆盖数据、模型、组合、回测和执行链路 | 更轻量的因子计算与评估内核，直接接 Polars DataFrame，适合已有数据管线 |
-| KunQuant | 将表达式 batch 编译成优化后的 C++/JIT 执行路径 | 不要求用户管理 C++ 编译/JIT 生命周期，强调 Python 易用性、Rust kernel 和评估闭环 |
-| pandas/Alphalens 类工具 | 交互式分析和传统 DataFrame 工作流 | 将因子加工、标签和评估放入同一个 Rust/Polars pipeline，减少大面板上的 Python 循环 |
+qweave 尚未发布到 PyPI。v0.4.1 已提供 CPython 3.10+ stable ABI 的 Windows、Linux
+和 macOS wheels，可从 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest)
+下载对应文件后安装。例如 Windows x64：
 
-更详细的定位见 [项目对比](docs/comparison.md)，可复现实验见
-[基准测试](docs/benchmark.md)。
+```powershell
+python -m pip install .\qweave-0.4.1-cp310-abi3-win_amd64.whl
+```
 
-## 快速开始
+从源码开发或试用：
+
+```powershell
+git clone https://github.com/GaomingOrion/qweave.git
+Set-Location qweave
+uv sync --dev --locked
+uv run maturin develop --uv --release
+```
+
+源码构建需要 Python 3.10+、`uv` 和仓库固定的 Rust nightly。更多信息见
+[开发者手册](docs/development.md)。
+
+## 从行情面板到因子报告
+
+仓库内置一个 80 个资产 × 320 个交易日的确定性合成面板。以下代码混合两个经典因子
+与一个自定义表达式，并完成标签、评估和报告导出：
 
 ```python
 import polars as pl
 import qweave as qf
 
-df = pl.DataFrame(
-    {
-        "asset": ["A", "A", "B", "B"],
-        "time": [1, 2, 1, 2],
-        "open": [10.0, 11.0, 20.0, 19.0],
-        "close": [11.0, 12.0, 19.0, 21.0],
-        "high": [12.0, 13.0, 21.0, 22.0],
-        "low": [9.0, 10.0, 18.0, 18.5],
-        "volume": [100.0, 120.0, 80.0, 90.0],
-        "tradable": [True, True, True, True],
-    }
+df = pl.read_parquet("examples/data/sample_daily.parquet")
+
+alphas = qf.worldquant_alpha101({}, alphas=["alpha13", "alpha101"])
+alphas.append(
+    (-(qf.col("close") / qf.col("close").delay(20) - qf.lit(1.0)))
+    .alias("mean_reversion_20")
 )
 
-alphas = [
-    (
-        (qf.col("close") - qf.col("open"))
-        / (qf.col("high") - qf.col("low") + qf.lit(0.001))
-    ).alias("intraday_return")
-]
-
-df = qf.with_alphas(df, "asset", "time", alphas)
+df = qf.with_alphas(df, "asset", "date", alphas)
 df = qf.with_labels(
     df,
     symbol_col="asset",
-    time_col="time",
-    horizons=[1],
-    entry_lag=0,
-    entry_col="close",
-    exit_col="close",
+    time_col="date",
+    horizons=[1, 5, 20],
+    entry_lag=1,
     tradable_col="tradable",
 )
 
 result = qf.evaluate(
     df,
     symbol_col="asset",
-    time_col="time",
-    factor_cols=["intraday_return"],
-    quantiles=2,
-    min_cs_count=2,
+    time_col="date",
+    factor_cols=["alpha13", "alpha101", "mean_reversion_20"],
+    quantiles=5,
+    min_cs_count=30,
     tradable_col="tradable_entry",
 )
 
 print(result.summary)
+result.to_html("qweave-report.html")
 ```
 
-批量计算内置因子：
-
-```python
-alphas = qf.worldquant_alpha101({}, alphas=["alpha13", "alpha101"])
-out = qf.compute_alphas(df, "asset", "time", alphas)
-```
-
-`with_alphas` 会按输入 DataFrame 原始行序追加因子列；`compute_alphas` 会输出完整
-的 `(time, symbol)` 面板，也可以写出 Parquet。
-
-## 安装
-
-当前仓库面向源码构建，尚未发布到 PyPI 或 crates.io。
-
-前置要求：
-
-- Python 3.10 或更新版本
-- `uv`
-- Rust nightly，包含 `rustfmt` 和 `clippy`
+也可以直接运行完整示例：
 
 ```powershell
-uv sync --dev
-uv run maturin develop
+uv run python examples\quickstart.py
 ```
 
-仓库包含 `rust-toolchain.toml`，Cargo 会自动使用固定的 nightly toolchain。
+合成面板的 5 日实际输出如下；它用于验证流程，不代表真实市场表现：
 
-## 能力地图
+| factor | RankIC mean | RankIC IR | top-bottom spread mean |
+| --- | ---: | ---: | ---: |
+| `alpha13` | 0.008565 | 0.070432 | 0.000899 |
+| `alpha101` | -0.002198 | -0.019618 | -0.000278 |
+| `mean_reversion_20` | 0.022806 | 0.181762 | 0.002273 |
 
-**已经可用**
+<p align="center">
+  <img src="docs/assets/report-demo.png" width="420" alt="qweave 因子评估报告：汇总表、分位收益和月度 IC">
+</p>
 
-- WorldQuant 101 和 Qlib Alpha158 表达式因子库。
-- Python 表达式 API：`col`、`lit`、算术/比较、rolling window、rank、
-  neutralization、`replace_inputs()`。
-- `compute_alphas` 和 `with_alphas`，覆盖批量 alpha 输出与原始 DataFrame 追加。
-- DAG alpha evaluator，支持公共子表达式复用、slot 复用、节点级并行和 fused
-  elementwise chain。
-- `with_labels`、`evaluate`、`factor_correlation`、HTML 报告和交互式报告。
+## 为什么是 qweave
 
-**计划中**
+- **一条 DataFrame pipeline：** 因子、标签和评估都围绕输入 Polars DataFrame
+  追加和流转，减少独立矩阵、重复转换和索引错位。
+- **一次执行整批因子：** 多个表达式进入同一 Rust DAG，统一完成公共子表达式复用、
+  中间 slot 复用、elementwise chain 融合和节点级并行。
+- **259 个可组合经典因子：** WorldQuant Alpha101 与 Qlib Alpha158 使用和自定义
+  表达式相同的 API，可筛选、改字段、混合并批量执行。
+- **明确的研究语义：** union calendar、`entry_lag`、入场日可交易性、确定性分箱和
+  重叠持有期 Newey–West t-stat 都有公开定义。
+- **报告直接可用：** `EvalResult.to_html()` 导出自包含报告，`view()` 打开 Vue +
+  ECharts 交互界面；千级因子还可流式写入 Parquet。
 
-- 量化建模、策略构建和回测模块。
-- 更完整的 API 参考和示例数据集。
-- 发布到 PyPI 和 crates.io。
+## 批量 DAG 的实际收益
 
-## 公开 API
+2026-07-10 在 Windows 11、Ryzen 9 9950X、61.7 GiB 内存上重新测量 5,000 个股票 ×
+1,000 天 × Alpha158 全部 158 因子。两条路径都组装相同的完整输出：
 
-- `qweave.compute_alphas(df, symbol_col, time_col, alphas, output_path=None)`
-- `qweave.with_alphas(df, symbol_col, time_col, alphas)`
-- `qweave.col(name)`、`qweave.lit(value)` 和表达式运算符
-- `qweave.worldquant_alpha101(input_alias, alphas=None)`
-- `qweave.qlib_alpha158(input_alias, alphas=None)`
-- `qweave.with_labels(...)`、`qweave.evaluate(...)`
-- `qweave.factor_correlation(...)`、`EvalResult.to_html(...)`、
-  `EvalResult.view()`
+| 执行方式 | 最佳耗时 | 平均耗时 | 进程峰值 RSS |
+| --- | ---: | ---: | ---: |
+| qweave 批量 DAG | **2.9630 s** | 3.0399 s | 9,934.4 MiB |
+| qweave 逐因子调用 | 50.4918 s | 51.4664 s | 8,404.1 MiB |
 
-输入规则：
+这次合成面板测量中，批量 DAG 的最佳耗时约为逐因子路径的 **1/17.0**，代价是约
+1.5 GiB 更高的峰值内存。结果依赖机器、版本和数据形态；完整环境、命令与口径见
+[性能与基准测试](docs/benchmark.md)。
 
-- `symbol_col` 和 `time_col` 不能包含 null。
-- 结构列不允许 NaN。
-- 浮点输入列中的 null 会转成 NaN，让因子逻辑自然传播缺失值。
-- 引擎会按 `(symbol_col, time_col)` 排序，并拒绝重复的 symbol-time。
-- 字段映射存在于表达式树中：使用 `PyExpr.replace_inputs()`，或使用内置因子库的
-  `input_alias` 参数。
+## 评估口径先于漂亮数字
 
-## 文档
+默认标签定义为：
 
-面向 GitHub 读者：
-
-- [项目对比](docs/comparison.md)
-- [性能与基准测试](docs/benchmark.md)
-- [架构与设计取舍](docs/architecture.md)
-- [Python 表达式 API](docs/expression_api.md)
-- [因子评估](docs/factor_evaluation.md)
-- [WorldQuant 101](docs/worldquant_alpha101.md)
-- [Qlib Alpha158](docs/qlib_alpha158.md)
-
-维护者入口：
-
-- [开发者手册](docs/development.md)
-
-本项目与 WorldQuant、Microsoft、Qlib 或 KunQuant 没有关联。
-
-## 开发检查
-
-提交前运行：
-
-```powershell
-cargo fmt --check
-cargo check --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-uv run maturin develop
-uv run python -m pytest
+```text
+信号日 T ── entry_lag ──> 入场日 T+1 ── horizon h ──> 退出日 T+1+h
 ```
 
-更多细节见 [开发者手册](docs/development.md)。
+- 日期偏移使用全市场 union calendar，不会因为某个资产缺行而偷偷压缩持有期。
+- `tradable_entry` 把入场日的可交易状态回移到信号日，明确样本为何可用。
+- 同时计算 Pearson IC 与 Spearman RankIC、分位收益、换手、rank autocorrelation
+  和多空组合诊断。
+- 重叠 forward returns 的均值检验使用 Newey–West t-stat。
+
+详细定义和非目标见[因子评估](docs/factor_evaluation.md)。
+
+## 与其他项目的边界
+
+| 如果你需要 | 更合适的选择 |
+| --- | --- |
+| 数据、模型、组合、回测和执行的完整 AI 量化平台 | Qlib |
+| 将表达式编译为 C++/JIT 执行路径 | KunQuant |
+| pandas 生态中的传统单因子分析工作流 | Alphalens 类工具 |
+| 在现有 Polars 数据管线中完成批量因子计算、严格标签和评估报告 | **qweave** |
+
+qweave 可以独立使用，也可以作为更大研究平台里的因子研究内核。详细比较见
+[项目对比](docs/comparison.md)。
+
+## 文档路径
+
+从[文档首页](docs/index.md)按顺序阅读：
+
+1. [可运行示例](examples/README.md)
+2. [Python 表达式 API](docs/expression_api.md)
+3. [WorldQuant 101](docs/worldquant_alpha101.md) / [Qlib Alpha158](docs/qlib_alpha158.md)
+4. [因子评估](docs/factor_evaluation.md)
+5. [架构](docs/architecture.md) / [性能与基准测试](docs/benchmark.md)
+
+## 项目状态
+
+qweave 的因子计算、标签、评估和报告链路已经可用，API 仍处于 pre-1.0 阶段。
+项目当前不模拟撮合、滑点、退出侧流动性或完整策略资金曲线。
+
+欢迎阅读 [CONTRIBUTING](CONTRIBUTING.md) 参与开发。项目与 WorldQuant、Microsoft、
+Qlib 或 KunQuant 没有关联。
 
 ## License
 

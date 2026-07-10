@@ -15,6 +15,7 @@ supported WorldQuant Alpha101 subset.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import importlib
 import json
@@ -133,6 +134,7 @@ class BenchResult:
     rows_per_second: float | None = None
     cells_per_second: float | None = None
     compile_seconds: float | None = None
+    peak_rss_mib: float | None = None
     output_rows: int | None = None
     output_columns: int | None = None
     note: str = ""
@@ -294,17 +296,45 @@ def run_qlib_alpha158_prepared(
     return loader.load(instruments=instruments, start_time=start_time, end_time=end_time)
 
 
-def run_qweave(df: pl.DataFrame, workload: str, names: Iterable[str] | None = None) -> pl.DataFrame:
+def qweave_alphas(workload: str, names: Iterable[str] | None = None):
     qweave = importlib.import_module("qweave")
     if workload == "alpha158":
         selected = list(names) if names else None
-        alphas = qweave.qlib_alpha158({}, alphas=selected)
+        return qweave.qlib_alpha158({}, alphas=selected)
     elif workload == "worldquant101":
         selected = worldquant_names(names)
-        alphas = qweave.worldquant_alpha101({}, alphas=selected)
+        return qweave.worldquant_alpha101({}, alphas=selected)
     else:
         raise ValueError(f"unsupported qweave workload: {workload}")
+
+
+def run_qweave(df: pl.DataFrame, workload: str, names: Iterable[str] | None = None) -> pl.DataFrame:
+    qweave = importlib.import_module("qweave")
+    alphas = qweave_alphas(workload, names)
     return qweave.compute_alphas(df, symbol_col="asset", time_col="time", alphas=alphas)
+
+
+def run_qweave_sequential(
+    df: pl.DataFrame,
+    workload: str,
+    names: Iterable[str] | None = None,
+) -> pl.DataFrame:
+    """Compute each factor in a separate DAG call, then assemble one output frame."""
+    qweave = importlib.import_module("qweave")
+    columns = None
+    for alpha in qweave_alphas(workload, names):
+        output = qweave.compute_alphas(
+            df,
+            symbol_col="asset",
+            time_col="time",
+            alphas=[alpha],
+        )
+        if columns is None:
+            columns = [output.get_column("time"), output.get_column("asset")]
+        columns.append(output.get_column(alpha.output_name()))
+    if columns is None:
+        raise ValueError("no factors selected")
+    return pl.DataFrame(columns)
 
 
 def _kunquant_alpha_attr(name: str) -> str:
@@ -398,14 +428,61 @@ def panel_to_kunquant_inputs(df: pl.DataFrame) -> dict[str, np.ndarray]:
 def measure(call: Callable[[], object], repeats: int, warmups: int) -> tuple[list[float], object]:
     result = None
     for _ in range(warmups):
+        result = None
+        gc.collect()
         result = call()
     times = []
     for _ in range(repeats):
+        result = None
         gc.collect()
         start = time.perf_counter()
         result = call()
         times.append(time.perf_counter() - start)
     return times, result
+
+
+def process_peak_rss_mib() -> float:
+    """Return peak resident memory for this process in MiB."""
+    if os.name == "nt":
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        get_current_process = ctypes.windll.kernel32.GetCurrentProcess
+        get_current_process.restype = ctypes.c_void_p
+        get_process_memory_info = ctypes.windll.psapi.GetProcessMemoryInfo
+        get_process_memory_info.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ProcessMemoryCounters),
+            ctypes.c_ulong,
+        ]
+        handle = get_current_process()
+        ok = get_process_memory_info(
+            handle,
+            ctypes.byref(counters),
+            counters.cb,
+        )
+        if not ok:
+            raise OSError("GetProcessMemoryInfo failed")
+        peak_bytes = counters.PeakWorkingSetSize
+    else:
+        import resource
+
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        peak_bytes = peak if sys.platform == "darwin" else peak * 1024
+    return peak_bytes / (1024 * 1024)
 
 
 def summarize(
@@ -434,6 +511,7 @@ def summarize(
         rows_per_second=rows / best if best > 0 else math.inf,
         cells_per_second=(rows * factors) / best if best > 0 else math.inf,
         compile_seconds=compile_seconds,
+        peak_rss_mib=process_peak_rss_mib(),
         output_rows=out_rows,
         output_columns=out_cols,
         note=note,
@@ -496,6 +574,23 @@ def run_benchmarks(args: argparse.Namespace) -> list[BenchResult]:
             try:
                 times, output = measure(call, args.repeats, args.warmups)
                 results.append(summarize(engine, args.workload, df.height, factor_count, times, output))
+            except Exception as exc:  # pragma: no cover - environment dependent
+                results.append(skipped(engine, args.workload, df.height, factor_count, str(exc)))
+        elif engine == "qweave-sequential":
+            call = lambda: run_qweave_sequential(df, args.workload, selected or None)
+            try:
+                times, output = measure(call, args.repeats, args.warmups)
+                results.append(
+                    summarize(
+                        engine,
+                        args.workload,
+                        df.height,
+                        factor_count,
+                        times,
+                        output,
+                        note="one DAG call per factor; outputs are assembled after computation",
+                    )
+                )
             except Exception as exc:  # pragma: no cover - environment dependent
                 results.append(skipped(engine, args.workload, df.height, factor_count, str(exc)))
         elif engine == "kunquant":
@@ -592,6 +687,7 @@ def print_table(results: list[BenchResult]) -> None:
         "best_s",
         "mean_s",
         "cells/s",
+        "peak_rss_mib",
         "compile_s",
         "note",
     ]
@@ -605,6 +701,7 @@ def print_table(results: list[BenchResult]) -> None:
             format_seconds(r.best_seconds),
             format_seconds(r.mean_seconds),
             format_rate(r.cells_per_second),
+            "-" if r.peak_rss_mib is None else f"{r.peak_rss_mib:.1f}",
             format_seconds(r.compile_seconds),
             r.note,
         ]
@@ -635,8 +732,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--engines", help="comma-separated engines; defaults depend on workload")
     parser.add_argument("--names", help="comma-separated factor names to benchmark")
-    parser.add_argument("--symbols", type=int, default=64)
-    parser.add_argument("--days", type=int, default=260)
+    parser.add_argument(
+        "--symbols", type=int, default=5000, help="synthetic panel symbols (default: 5000)"
+    )
+    parser.add_argument(
+        "--days", type=int, default=1000, help="synthetic panel days (default: 1000)"
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)

@@ -11,3 +11,4 @@ docs/plans/*
 docs/review/
 frontend/node_modules/
 frontend/dist/
+examples/output/

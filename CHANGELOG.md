@@ -7,7 +7,15 @@ and patch versions should remain backward compatible within a minor line.
 
 ## Unreleased
 
-- None.
+- Repositioned the bilingual README around qweave's Polars-native factor
+  research workflow, with a reproducible end-to-end example and real report
+  screenshot.
+- Added a deterministic synthetic sample panel, documentation learning path,
+  and GitHub social-preview assets.
+- Added a 5,000-symbol × 1,000-day batch-DAG benchmark against per-factor DAG
+  calls, including process peak RSS.
+- Added native release-wheel smoke tests and PyPI Trusted Publishing to the
+  release workflow.
 
 ## v0.4.1 - 2026-07-10
 

@@ -39,6 +39,28 @@ source.
 `uv run maturin develop` builds and installs the local extension module into the
 project environment. Re-run it after changing Rust code used by `qweave-py`.
 
+## Releases And PyPI
+
+`.github/workflows/release.yml` builds CPython 3.10+ stable-ABI wheels for
+Windows, Linux, and macOS on version tags. Every native runner executes
+`scripts/smoke_wheel.py`; the Linux aarch64 wheel is cross-compiled and cannot
+run on the x86_64 runner.
+
+PyPI uses Trusted Publishing, so no publishing token is stored in the
+repository. Before the first publication, a maintainer must configure this
+publisher for `qweave` on PyPI:
+
+```text
+Owner: GaomingOrion
+Repository: qweave
+Workflow: release.yml
+Environment: pypi
+```
+
+After that configuration, a new version tag builds the same distributions for
+GitHub Release and the `publish-pypi` job uploads them to PyPI. Before tagging,
+follow the repository release rules for version, Changelog, and release notes.
+
 ## Local Benchmarks
 
 The synthetic alpha benchmark is an ignored Rust test:
