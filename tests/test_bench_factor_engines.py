@@ -53,6 +53,32 @@ def test_panel_to_kunquant_inputs_are_time_stock_matrices():
     assert inputs["close"][:, 0].tolist() == pytest.approx(first_asset.get_column("close").to_list())
 
 
+def test_kunquant_output_conversion_preserves_asset_time_row_order():
+    df = bench.build_ohlcv_panel(2, 3, seed=29)
+    output = {"alpha1": np.arange(6, dtype=np.float64).reshape(3, 2)}
+
+    converted = bench.kunquant_output_to_dataframe(output, df)
+
+    assert converted.columns == ["time", "asset", "alpha1"]
+    assert converted.get_column("asset").to_list() == ["S00000"] * 3 + ["S00001"] * 3
+    assert converted.get_column("time").to_list() == [1, 2, 3, 1, 2, 3]
+    assert converted.get_column("alpha1").to_list() == [0.0, 2.0, 4.0, 1.0, 3.0, 5.0]
+
+
+def test_benchmark_summary_retains_output_conversion_time():
+    result = bench.summarize(
+        "kunquant",
+        "worldquant101",
+        rows=6,
+        factors=1,
+        times=[1.0],
+        output=pl.DataFrame({"time": [1], "asset": ["S00000"], "alpha1": [1.0]}),
+        output_conversion_seconds=0.25,
+    )
+
+    assert result.output_conversion_seconds == 0.25
+
+
 def test_qlib_provider_writer_creates_minimal_binary_layout(tmp_path):
     df = bench.build_ohlcv_panel(2, 4, seed=19)
 

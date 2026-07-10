@@ -134,6 +134,7 @@ class BenchResult:
     rows_per_second: float | None = None
     cells_per_second: float | None = None
     compile_seconds: float | None = None
+    output_conversion_seconds: float | None = None
     peak_rss_mib: float | None = None
     output_rows: int | None = None
     output_columns: int | None = None
@@ -354,7 +355,7 @@ def run_kunquant_worldquant101(
     df: pl.DataFrame,
     names: Iterable[str] | None = None,
     threads: int | None = None,
-) -> tuple[dict[str, np.ndarray], float]:
+) -> tuple[pl.DataFrame, float, float]:
     """Run KunQuant's predefined Alpha101 path when the optional package exists."""
     selected = worldquant_names(names)
     try:
@@ -416,7 +417,11 @@ def run_kunquant_worldquant101(
 
         input_dict = panel_to_kunquant_inputs(df)
         executor = kr.createMultiThreadExecutor(threads or os.cpu_count() or 1)
-        return kr.runGraph(executor, module, input_dict, 0, input_dict["close"].shape[0]), compile_seconds
+        output = kr.runGraph(executor, module, input_dict, 0, input_dict["close"].shape[0])
+        conversion_start = time.perf_counter()
+        frame = kunquant_output_to_dataframe(output, df)
+        conversion_seconds = time.perf_counter() - conversion_start
+        return frame, compile_seconds, conversion_seconds
 
 
 def panel_to_kunquant_inputs(df: pl.DataFrame) -> dict[str, np.ndarray]:
@@ -434,6 +439,20 @@ def panel_to_kunquant_inputs(df: pl.DataFrame) -> dict[str, np.ndarray]:
         values = sorted_df.get_column(column).to_numpy().reshape(n_assets, n_times)
         out[column] = np.ascontiguousarray(values.T.astype(np.float64))
     return out
+
+
+def kunquant_output_to_dataframe(
+    output: dict[str, np.ndarray], df: pl.DataFrame
+) -> pl.DataFrame:
+    """Convert KunQuant's [time, stocks] output arrays to a Polars DataFrame."""
+    sorted_df = df.sort(["asset", "time"])
+    columns: dict[str, object] = {
+        "time": sorted_df.get_column("time"),
+        "asset": sorted_df.get_column("asset"),
+    }
+    for name, values in output.items():
+        columns[name] = np.ascontiguousarray(values.T).reshape(-1)
+    return pl.DataFrame(columns)
 
 
 def measure(call: Callable[[], object], repeats: int, warmups: int) -> tuple[list[float], object]:
@@ -504,6 +523,7 @@ def summarize(
     times: list[float],
     output: object,
     compile_seconds: float | None = None,
+    output_conversion_seconds: float | None = None,
     note: str = "",
 ) -> BenchResult:
     best = min(times)
@@ -522,6 +542,7 @@ def summarize(
         rows_per_second=rows / best if best > 0 else math.inf,
         cells_per_second=(rows * factors) / best if best > 0 else math.inf,
         compile_seconds=compile_seconds,
+        output_conversion_seconds=output_conversion_seconds,
         peak_rss_mib=process_peak_rss_mib(),
         output_rows=out_rows,
         output_columns=out_cols,
@@ -612,18 +633,21 @@ def run_benchmarks(args: argparse.Namespace) -> list[BenchResult]:
                 continue
             try:
                 compile_seconds_holder: list[float] = []
+                conversion_seconds_holder: list[float] = []
 
                 def call_kunquant():
-                    output, compile_seconds = run_kunquant_worldquant101(
+                    output, compile_seconds, conversion_seconds = run_kunquant_worldquant101(
                         df,
                         selected,
                         threads=args.threads,
                     )
                     compile_seconds_holder.append(compile_seconds)
+                    conversion_seconds_holder.append(conversion_seconds)
                     return output
 
                 times, output = measure(call_kunquant, args.repeats, args.warmups)
                 compile_seconds = min(compile_seconds_holder) if compile_seconds_holder else None
+                conversion_seconds = min(conversion_seconds_holder) if conversion_seconds_holder else None
                 results.append(
                     summarize(
                         engine,
@@ -633,7 +657,8 @@ def run_benchmarks(args: argparse.Namespace) -> list[BenchResult]:
                         times,
                         output,
                         compile_seconds=compile_seconds,
-                        note="f64 with fast statistics disabled; elapsed includes compile+run; compile_seconds reports the best observed compile phase",
+                        output_conversion_seconds=conversion_seconds,
+                        note="f64 with fast statistics disabled; elapsed includes input conversion, compile, run, and output conversion",
                     )
                 )
             except Exception as exc:  # pragma: no cover - optional package/toolchain
@@ -700,6 +725,7 @@ def print_table(results: list[BenchResult]) -> None:
         "cells/s",
         "peak_rss_mib",
         "compile_s",
+        "output_convert_s",
         "note",
     ]
     rows = [
@@ -714,6 +740,7 @@ def print_table(results: list[BenchResult]) -> None:
             format_rate(r.cells_per_second),
             "-" if r.peak_rss_mib is None else f"{r.peak_rss_mib:.1f}",
             format_seconds(r.compile_seconds),
+            format_seconds(r.output_conversion_seconds),
             r.note,
         ]
         for r in results
