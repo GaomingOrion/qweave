@@ -587,9 +587,9 @@ mod tests {
                 volume.push(volume_value);
                 vwap.push((high_value + low_value + close_value) / 3.0);
                 cap.push(close_value * (1_000_000.0 + symbol * 10_000.0));
-                sector.push((symbol_idx % 2) as f64);
-                industry.push((symbol_idx % 3) as f64);
-                subindustry.push((symbol_idx % 3) as f64);
+                sector.push((symbol_idx % 2) as i32);
+                industry.push((symbol_idx % 3) as i32);
+                subindustry.push((symbol_idx % 3) as i32);
             }
         }
 

@@ -5,7 +5,12 @@ All notable changes will be documented in this file.
 The project follows pre-1.0 semantic versioning: minor versions may change APIs,
 and patch versions should remain backward compatible within a minor line.
 
-## Unreleased
+## v0.5.0 - 2026-07-11
+
+- Added non-null String and integer group columns backed by validated `i32`
+  storage for `group_rank`, `group_neutralize`, and WorldQuant 101 groups.
+- Removed the legacy static `to_html` report API in favor of `view()`.
+- Added an in-report button that gracefully stops the local report server.
 
 - Repositioned the bilingual README around qweave's Polars-native factor
   research workflow, with a reproducible end-to-end example and real report

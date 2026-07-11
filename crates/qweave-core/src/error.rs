@@ -30,6 +30,15 @@ pub enum QWeaveError {
         actual: String,
     },
 
+    #[error("null values are not allowed in group column `{0}`")]
+    GroupNull(String),
+
+    #[error("value in group column `{column}` cannot be represented as i32: {value}")]
+    GroupValueOutOfRange { column: String, value: String },
+
+    #[error("group argument must be a column expression")]
+    GroupColumnRequired,
+
     #[error("factor `{0}` is not known")]
     UnknownFactor(String),
 

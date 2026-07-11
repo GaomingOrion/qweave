@@ -67,8 +67,8 @@ intraday_return = (
 | --- | --- |
 | `rank()` | 当日截面百分位 rank，取值 `(0, 1]`，ties 取平均 |
 | `scale(scale_to=1.0)` | 缩放使当日截面 `sum(abs(x)) = scale_to`；全零截面输出 NaN |
-| `group_rank(x, g)` | 在（日期, 分组）内的百分位 rank |
-| `group_neutralize(x, g)` | 减去（日期, 分组）内的均值 |
+| `group_rank(x, g)` | 在（日期, 分组）内的百分位 rank；`g` 必须是无空值的 String/整数列，整数须在 `i32` 范围内 |
+| `group_neutralize(x, g)` | 减去（日期, 分组）内的均值；`g` 的类型约束同上 |
 
 ## 执行表达式
 

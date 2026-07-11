@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::error::{QWeaveError, Result};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CmpOp {
     Lt,
@@ -117,6 +119,64 @@ pub fn collect_fields(expr: &Expr, out: &mut BTreeSet<String>) {
     visit_fields(expr, &mut |name| {
         out.insert(name.to_string());
     });
+}
+
+pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<()> {
+    match expr {
+        Expr::GroupRank(values, groups) | Expr::GroupNeutralize(values, groups) => {
+            collect_group_fields(values, out)?;
+            match groups.as_ref() {
+                Expr::Field(name) => {
+                    out.insert(name.clone());
+                }
+                _ => return Err(QWeaveError::GroupColumnRequired),
+            }
+        }
+        Expr::Add(lhs, rhs)
+        | Expr::Sub(lhs, rhs)
+        | Expr::Mul(lhs, rhs)
+        | Expr::Div(lhs, rhs)
+        | Expr::Min(lhs, rhs)
+        | Expr::Max(lhs, rhs)
+        | Expr::Cmp(_, lhs, rhs)
+        | Expr::Correlation(lhs, rhs, _)
+        | Expr::Covariance(lhs, rhs, _)
+        | Expr::SignedPower(lhs, rhs)
+        | Expr::Power(lhs, rhs) => {
+            collect_group_fields(lhs, out)?;
+            collect_group_fields(rhs, out)?;
+        }
+        Expr::Where(cond, when_true, when_false) => {
+            collect_group_fields(cond, out)?;
+            collect_group_fields(when_true, out)?;
+            collect_group_fields(when_false, out)?;
+        }
+        Expr::Neg(inner)
+        | Expr::Delay(inner, _)
+        | Expr::Delta(inner, _)
+        | Expr::TsSum(inner, _)
+        | Expr::TsMean(inner, _)
+        | Expr::Product(inner, _)
+        | Expr::TsMin(inner, _)
+        | Expr::TsMax(inner, _)
+        | Expr::TsArgMin(inner, _)
+        | Expr::TsArgMax(inner, _)
+        | Expr::TsRank(inner, _)
+        | Expr::TsRankRaw(inner, _)
+        | Expr::TsStd(inner, _)
+        | Expr::Slope(inner, _)
+        | Expr::Rsquare(inner, _)
+        | Expr::Resi(inner, _)
+        | Expr::Quantile(inner, _, _)
+        | Expr::DecayLinear(inner, _)
+        | Expr::Rank(inner)
+        | Expr::Scale(inner, _)
+        | Expr::Abs(inner)
+        | Expr::Log(inner)
+        | Expr::Sign(inner) => collect_group_fields(inner, out)?,
+        Expr::Field(_) | Expr::Const(_) => {}
+    }
+    Ok(())
 }
 
 pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {

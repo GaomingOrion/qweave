@@ -14,24 +14,40 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde_json::{Value, json};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 pub use data::{DataError, ReportData};
 
-type Shared = Arc<ReportData>;
+#[derive(Clone)]
+struct AppState {
+    data: Arc<ReportData>,
+    shutdown: Arc<tokio::sync::Notify>,
+}
 
 /// Build the report router. The frontend is served from `assets_override` (a
 /// `dist` dir, for dev) when given, else from the embedded build, else an
 /// API-only placeholder.
 pub fn router(data: ReportData, assets_override: Option<PathBuf>) -> Router {
+    router_with_shutdown(data, assets_override, Arc::new(tokio::sync::Notify::new()))
+}
+
+fn router_with_shutdown(
+    data: ReportData,
+    assets_override: Option<PathBuf>,
+    shutdown_signal: Arc<tokio::sync::Notify>,
+) -> Router {
     let api = Router::new()
         .route("/api/meta", get(meta))
         .route("/api/summary", get(summary))
         .route("/api/factor/{name}", get(factor))
-        .with_state(Arc::new(data))
+        .route("/api/shutdown", post(shutdown))
+        .with_state(AppState {
+            data: Arc::new(data),
+            shutdown: shutdown_signal,
+        })
         .layer(CorsLayer::permissive());
 
     match assets_override.filter(|p| p.join("index.html").is_file()) {
@@ -46,7 +62,7 @@ pub fn router(data: ReportData, assets_override: Option<PathBuf>) -> Router {
 }
 
 /// Serve `data` on `127.0.0.1:port` (port 0 picks a free port), optionally
-/// opening the browser, and block until Ctrl-C. Builds its own tokio runtime so
+/// opening the browser, and block until Ctrl-C or the report's stop button. Builds its own tokio runtime so
 /// it can be called from a plain (non-async) context, e.g. the Python binding.
 pub fn run_server(
     data: ReportData,
@@ -65,28 +81,40 @@ pub fn run_server(
         if open {
             open_browser(&url);
         }
-        axum::serve(listener, router(data, assets_override))
-            .with_graceful_shutdown(async {
-                tokio::signal::ctrl_c().await.ok();
-            })
-            .await
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        axum::serve(
+            listener,
+            router_with_shutdown(data, assets_override, shutdown.clone()),
+        )
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = shutdown.notified() => {}
+            }
+        })
+        .await
     })?;
     Ok(())
 }
 
-async fn meta(State(d): State<Shared>) -> Json<Value> {
-    Json(d.meta_value())
+async fn meta(State(state): State<AppState>) -> Json<Value> {
+    Json(state.data.meta_value())
 }
 
-async fn summary(State(d): State<Shared>) -> Json<Value> {
-    Json(d.summary_records())
+async fn summary(State(state): State<AppState>) -> Json<Value> {
+    Json(state.data.summary_records())
 }
 
 async fn factor(
-    State(d): State<Shared>,
+    State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(d.factor_bundle(&name)?))
+    Ok(Json(state.data.factor_bundle(&name)?))
+}
+
+async fn shutdown(State(state): State<AppState>) -> StatusCode {
+    state.shutdown.notify_one();
+    StatusCode::OK
 }
 
 /// Serve an embedded frontend file, falling back to `index.html` for SPA routes.
@@ -237,6 +265,23 @@ mod tests {
         let (status, _) = get_json(&app, "/api/factor/nope").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn shutdown_endpoint_notifies_server() {
+        let dir = fixture_dir();
+        let signal = Arc::new(tokio::sync::Notify::new());
+        let app = router_with_shutdown(ReportData::from_dir(&dir).unwrap(), None, signal.clone());
+        let response = app
+            .oneshot(Request::post("/api/shutdown").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        tokio::time::timeout(std::time::Duration::from_secs(1), signal.notified())
+            .await
+            .expect("shutdown signal");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

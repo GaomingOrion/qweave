@@ -38,8 +38,14 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function shutdown(): Promise<void> {
+  const res = await fetch("/api/shutdown", { method: "POST" });
+  if (!res.ok) throw new Error(`${res.status} /api/shutdown`);
+}
+
 export const api = {
   meta: () => getJson<Meta>("/api/meta"),
   summary: () => getJson<SummaryRow[]>("/api/summary"),
   factor: (name: string) => getJson<FactorBundle>(`/api/factor/${encodeURIComponent(name)}`),
+  shutdown,
 };

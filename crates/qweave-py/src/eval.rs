@@ -5,7 +5,7 @@ use pyo3_polars::PyDataFrame;
 use qweave_core::PanelOptions;
 use qweave_eval::{
     Binning, Demean, EvalOutput, EvaluateOptions, TableData, Weighting, evaluate as evaluate_core,
-    factor_correlation as factor_correlation_core, save_output, to_html as to_html_core,
+    factor_correlation as factor_correlation_core, save_output,
 };
 use qweave_server::{ReportData, run_server};
 
@@ -89,18 +89,9 @@ impl PyEvalResult {
             .map_err(|err| PyValueError::new_err(err.to_string()))
     }
 
-    /// Write a self-contained HTML report (sortable summary table + per-factor
-    /// quantile-return and monthly-IC charts) to `path`. Memory mode only;
-    /// `max_detail_factors` caps the drill-down bundle to bound file size.
-    #[pyo3(signature = (path, max_detail_factors = 200))]
-    fn to_html(&self, py: Python<'_>, path: &str, max_detail_factors: usize) -> PyResult<()> {
-        py.detach(|| to_html_core(&self.output, path, max_detail_factors))
-            .map_err(|err| PyValueError::new_err(err.to_string()))
-    }
-
     /// Open an interactive report (summary table + per-factor Returns/IC
     /// tearsheets) in the default browser and block until the server is stopped
-    /// (Ctrl-C). The server and UI are embedded — no external files needed.
+    /// from the report page. The server and UI are embedded — no external files needed.
     /// Memory mode only (call `save()` then `qweave-server --dir <dir>` for a
     /// streamed result).
     fn view(&self, py: Python<'_>) -> PyResult<()> {

@@ -56,7 +56,7 @@ def main() -> None:
             "spread_mean",
         )
     )
-    print("\nopening interactive report (Ctrl-C to stop) ...")
+    print("\nopening interactive report (use 停止服务 to stop) ...")
     result.view()
 
 

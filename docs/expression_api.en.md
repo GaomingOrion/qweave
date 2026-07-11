@@ -69,8 +69,8 @@ Shared calibers:
 | --- | --- |
 | `rank()` | cross-sectional percentile rank, in `(0, 1]`, ties averaged |
 | `scale(scale_to=1.0)` | rescale so the day's `sum(abs(x)) = scale_to`; all-zero cross-sections yield NaN |
-| `group_rank(x, g)` | percentile rank within each (date, group) |
-| `group_neutralize(x, g)` | subtract the (date, group) mean |
+| `group_rank(x, g)` | percentile rank within each (date, group); `g` must be a non-null String/integer column, with integers in the `i32` range |
+| `group_neutralize(x, g)` | subtract the (date, group) mean; `g` has the same type constraint |
 
 ## Execute Expressions
 

@@ -1,6 +1,6 @@
 [package]
 name = "qweave-factors"
-version = "0.4.1"
+version = "0.5.0"
 description = "Built-in qweave factor and WorldQuant 101 definitions"
 authors.workspace = true
 edition.workspace = true

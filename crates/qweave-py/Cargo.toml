@@ -1,6 +1,6 @@
 [package]
 name = "qweave-py"
-version = "0.4.1"
+version = "0.5.0"
 description = "Python extension module for qweave"
 authors.workspace = true
 edition.workspace = true

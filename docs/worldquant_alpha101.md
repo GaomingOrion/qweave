@@ -47,7 +47,7 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 - Tier A：基础 OHLCV 字段 `open`、`high`、`low`、`close`、`volume`；
   `returns` 从 `close` 派生。
 - Tier B：Tier A 加上公式引用的 `vwap` 或 `cap`；`adv{d}` 从 `volume` 派生。
-- Tier C：需要数值型分组字段 `sector`、`industry` 或 `subindustry`。
+- Tier C：需要无空值的 String 或整数分组字段 `sector`、`industry` 或 `subindustry`（整数值必须在 `i32` 范围内）。
 
 如果只使用基础 OHLCV 数据，可以先选择 Tier A alpha；数据中包含 `vwap`、`cap` 或
 行业分类后，再逐步打开 Tier B/Tier C。

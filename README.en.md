@@ -43,15 +43,15 @@ Install directly from
 
 ```powershell
 # Windows x64
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.4.1/qweave-0.4.1-cp310-abi3-win_amd64.whl
+python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-win_amd64.whl
 ```
 
 ```bash
 # Linux x86_64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.4.1/qweave-0.4.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 # macOS arm64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.4.1/qweave-0.4.1-cp310-abi3-macosx_11_0_arm64.whl
+pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-macosx_11_0_arm64.whl
 ```
 
 Wheels for other platforms (Linux aarch64, macOS x86_64) are on the

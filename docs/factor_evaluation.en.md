@@ -187,8 +187,6 @@ interactive report (summary table + per-factor Returns/IC tearsheets) in the
 browser, with no external files required. It is best used on a filtered
 shortlist, not a thousand-factor full run.
 
-`result.to_html(path, max_detail_factors=200)` writes a single-file HTML
-report.
 
 For streamed output:
 

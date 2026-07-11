@@ -152,17 +152,29 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
         }
         Expr::GroupRank(values, groups) => {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
-            let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
+            let Expr::Field(group_name) = groups.as_ref() else {
+                return Err(QWeaveError::GroupColumnRequired);
+            };
+            let groups = cs
+                .groups
+                .get(group_name)
+                .ok_or_else(|| QWeaveError::MissingColumn(group_name.clone()))?;
             Ok(owned_cells(
-                group_rank(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
+                group_rank(&values, Layout::Tn, groups, Layout::Nt, Layout::Tn, cs),
                 Layout::Tn,
             ))
         }
         Expr::GroupNeutralize(values, groups) => {
             let values = to_cells(eval(values, cs)?, Layout::Tn, cs);
-            let groups = to_cells(eval(groups, cs)?, Layout::Tn, cs);
+            let Expr::Field(group_name) = groups.as_ref() else {
+                return Err(QWeaveError::GroupColumnRequired);
+            };
+            let groups = cs
+                .groups
+                .get(group_name)
+                .ok_or_else(|| QWeaveError::MissingColumn(group_name.clone()))?;
             Ok(owned_cells(
-                group_neutralize(&values, Layout::Tn, &groups, Layout::Tn, Layout::Tn, cs),
+                group_neutralize(&values, Layout::Tn, groups, Layout::Nt, Layout::Tn, cs),
                 Layout::Tn,
             ))
         }
@@ -777,24 +789,24 @@ fn xs_per_block(
 fn xs_per_group(
     values: &[f64],
     values_layout: Layout,
-    groups: &[f64],
+    groups: &[i32],
     groups_layout: Layout,
     output: Layout,
     cs: &CellSet,
     f: impl Fn(Vec<(usize, f64)>) -> Vec<(usize, f64)> + Sync,
 ) -> Vec<f64> {
     scatter_pairs(values.len(), output, cs, |block| {
-        let mut buckets: HashMap<u64, Vec<(usize, f64)>> = HashMap::new();
+        let mut buckets: HashMap<i32, Vec<(usize, f64)>> = HashMap::new();
         for tn_idx in block.clone() {
             let value = read_cell(values, values_layout, tn_idx, cs);
-            let group = read_cell(groups, groups_layout, tn_idx, cs);
-            if value.is_nan() || group.is_nan() {
+            let group = match groups_layout {
+                Layout::Tn => groups[tn_idx],
+                Layout::Nt => groups[cs.tn_order[tn_idx]],
+            };
+            if value.is_nan() {
                 continue;
             }
-            buckets
-                .entry(group.to_bits())
-                .or_default()
-                .push((tn_idx, value));
+            buckets.entry(group).or_default().push((tn_idx, value));
         }
 
         buckets.into_values().flat_map(&f).collect()
@@ -1005,7 +1017,7 @@ pub(crate) fn scale(
 pub(crate) fn group_rank(
     values: &[f64],
     values_layout: Layout,
-    groups: &[f64],
+    groups: &[i32],
     groups_layout: Layout,
     output: Layout,
     cs: &CellSet,
@@ -1024,7 +1036,7 @@ pub(crate) fn group_rank(
 pub(crate) fn group_neutralize(
     values: &[f64],
     values_layout: Layout,
-    groups: &[f64],
+    groups: &[i32],
     groups_layout: Layout,
     output: Layout,
     cs: &CellSet,
@@ -1302,11 +1314,17 @@ mod tests {
     }
 
     fn test_cellset_fields(
-        fields: HashMap<String, Vec<f64>>,
+        mut fields: HashMap<String, Vec<f64>>,
         sym_blocks: Vec<Range<usize>>,
         time_blocks: Vec<Range<usize>>,
     ) -> CellSet {
         let n_cells = fields.values().next().map_or(0, Vec::len);
+        let groups = fields.remove("g").map_or_else(HashMap::new, |values| {
+            HashMap::from([(
+                "g".to_string(),
+                Arc::new(values.into_iter().map(|v| v as i32).collect()),
+            )])
+        });
         CellSet {
             n_cells,
             sym_blocks,
@@ -1317,6 +1335,7 @@ mod tests {
                 .into_iter()
                 .map(|(name, values)| (name, Arc::new(values)))
                 .collect(),
+            groups,
             symbols_tn: Column::new("asset".into(), vec!["A"; n_cells]),
             times_tn: Column::new("time".into(), (0..n_cells as i64).collect::<Vec<_>>()),
             time_block_by_value: HashMap::new(),
@@ -2255,7 +2274,7 @@ mod tests {
         let cs = test_cellset_fields(
             HashMap::from([
                 ("x".to_string(), vec![5.0, 2.0, 2.0, 9.0, f64::NAN, 1.0]),
-                ("g".to_string(), vec![1.0, 1.0, 1.0, 2.0, 1.0, f64::NAN]),
+                ("g".to_string(), vec![1.0, 1.0, 1.0, 2.0, 1.0, 2.0]),
             ]),
             vec![0..1, 1..2, 2..3, 3..4, 4..5, 5..6],
             one_block(0..6),
@@ -2292,7 +2311,7 @@ mod tests {
             Layout::Tn,
             &cs,
         );
-        assert_vec_close(&ranked, &[1.0, 0.5, 0.5, 1.0, f64::NAN, f64::NAN]);
+        assert_vec_close(&ranked, &[1.0, 0.5, 0.5, 1.0, f64::NAN, 0.5]);
 
         let neutralized = to_cells(
             eval(
@@ -2305,7 +2324,7 @@ mod tests {
             Layout::Tn,
             &cs,
         );
-        assert_vec_close(&neutralized, &[2.0, -1.0, -1.0, 0.0, f64::NAN, f64::NAN]);
+        assert_vec_close(&neutralized, &[2.0, -1.0, -1.0, 4.0, f64::NAN, -4.0]);
 
         let zero_cs = test_cellset(vec![0.0, 0.0], vec![0..1, 1..2], one_block(0..2));
         let zero_scaled = to_cells(

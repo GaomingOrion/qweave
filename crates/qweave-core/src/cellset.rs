@@ -23,6 +23,7 @@ pub struct CellSet {
     pub tn_order: Vec<usize>,
     pub orig_index_tn: Vec<usize>,
     pub fields: HashMap<String, Arc<Vec<f64>>>,
+    pub groups: HashMap<String, Arc<Vec<i32>>>,
     pub symbols_tn: Column,
     pub times_tn: Column,
     pub time_block_by_value: HashMap<AnyValue<'static>, usize>,
@@ -33,6 +34,15 @@ pub fn build_cellset(
     options: &PanelOptions,
     fields: &BTreeSet<String>,
 ) -> Result<CellSet> {
+    build_cellset_with_groups(df, options, fields, &BTreeSet::new())
+}
+
+pub fn build_cellset_with_groups(
+    df: &DataFrame,
+    options: &PanelOptions,
+    fields: &BTreeSet<String>,
+    groups: &BTreeSet<String>,
+) -> Result<CellSet> {
     let symbol_col = df
         .column(&options.symbol_col)
         .map_err(|_| QWeaveError::MissingColumn(options.symbol_col.clone()))?;
@@ -42,19 +52,25 @@ pub fn build_cellset(
 
     validate_structural_column(symbol_col, true)?;
     validate_structural_column(time_col, false)?;
-    validate_fields(df, options, fields)?;
+    validate_fields(df, fields)?;
+    validate_groups(df, groups)?;
 
     let indexed = df.with_row_index(ORIG_INDEX.into(), None)?;
     // Only the structural columns, the row index, and the requested field columns
     // are ever read back from `sorted`. Projecting before the sort keeps it from
     // gathering a full-width copy of every (possibly hundreds of) unrelated column.
-    let mut projection: Vec<&str> = Vec::with_capacity(fields.len() + 3);
+    let mut projection: Vec<&str> = Vec::with_capacity(fields.len() + groups.len() + 3);
     projection.push(&options.symbol_col);
     projection.push(&options.time_col);
     projection.push(ORIG_INDEX);
     for field in fields {
         if field != &options.symbol_col && field != &options.time_col {
             projection.push(field);
+        }
+    }
+    for group in groups {
+        if group != &options.symbol_col && group != &options.time_col && !fields.contains(group) {
+            projection.push(group);
         }
     }
     let narrow = indexed.select(projection)?;
@@ -95,6 +111,7 @@ pub fn build_cellset(
     let (time_blocks, time_block_by_value) = time_blocks(&times_tn)?;
 
     let fields = build_fields(&sorted, options, fields)?;
+    let groups = build_groups(&sorted, groups)?;
 
     Ok(CellSet {
         n_cells: sorted.height(),
@@ -103,17 +120,14 @@ pub fn build_cellset(
         tn_order,
         orig_index_tn,
         fields,
+        groups,
         symbols_tn,
         times_tn,
         time_block_by_value,
     })
 }
 
-fn validate_fields(
-    df: &DataFrame,
-    _options: &PanelOptions,
-    fields: &BTreeSet<String>,
-) -> Result<()> {
+fn validate_fields(df: &DataFrame, fields: &BTreeSet<String>) -> Result<()> {
     for column_name in fields {
         let column = df
             .column(column_name)
@@ -154,6 +168,90 @@ fn ensure_f64(column: &Column) -> Result<()> {
             actual: column.dtype().to_string(),
         })
     }
+}
+
+fn validate_groups(df: &DataFrame, groups: &BTreeSet<String>) -> Result<()> {
+    for name in groups {
+        let column = df
+            .column(name)
+            .map_err(|_| QWeaveError::MissingColumn(name.clone()))?;
+        if column.null_count() > 0 {
+            return Err(QWeaveError::GroupNull(name.clone()));
+        }
+        if !matches!(
+            column.dtype(),
+            DataType::String
+                | DataType::Int8
+                | DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::UInt8
+                | DataType::UInt16
+                | DataType::UInt32
+                | DataType::UInt64
+        ) {
+            return Err(QWeaveError::DTypeMismatch {
+                column: name.clone(),
+                expected: "string or integer group column",
+                actual: column.dtype().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn build_groups(
+    df: &DataFrame,
+    groups: &BTreeSet<String>,
+) -> Result<HashMap<String, Arc<Vec<i32>>>> {
+    let mut out = HashMap::with_capacity(groups.len());
+    for name in groups {
+        let column = df.column(name)?;
+        let values = if column.dtype() == &DataType::String {
+            let mut codes = HashMap::<&str, i32>::new();
+            column
+                .try_str()
+                .expect("dtype checked")
+                .iter()
+                .map(|value| {
+                    let value = value.expect("nulls rejected before sorting");
+                    let next = i32::try_from(codes.len()).map_err(|_| {
+                        QWeaveError::GroupValueOutOfRange {
+                            column: name.clone(),
+                            value: "more than i32::MAX distinct groups".to_string(),
+                        }
+                    })?;
+                    Ok(*codes.entry(value).or_insert(next))
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            column
+                .as_materialized_series()
+                .iter()
+                .map(|value| integer_to_i32(name, value))
+                .collect::<Result<Vec<_>>>()?
+        };
+        out.insert(name.clone(), Arc::new(values));
+    }
+    Ok(out)
+}
+
+fn integer_to_i32(column: &str, value: AnyValue<'_>) -> Result<i32> {
+    let value = match value {
+        AnyValue::Int8(v) => v as i128,
+        AnyValue::Int16(v) => v as i128,
+        AnyValue::Int32(v) => v as i128,
+        AnyValue::Int64(v) => v as i128,
+        AnyValue::UInt8(v) => v as i128,
+        AnyValue::UInt16(v) => v as i128,
+        AnyValue::UInt32(v) => v as i128,
+        AnyValue::UInt64(v) => v as i128,
+        _ => unreachable!("group dtype checked before sorting"),
+    };
+    i32::try_from(value).map_err(|_| QWeaveError::GroupValueOutOfRange {
+        column: column.to_string(),
+        value: value.to_string(),
+    })
 }
 
 pub(crate) fn validate_structural_column(column: &Column, is_symbol: bool) -> Result<()> {
@@ -333,6 +431,56 @@ mod tests {
     }
 
     #[test]
+    fn build_cellset_encodes_string_and_integer_groups_as_i32() -> Result<()> {
+        let df = df!(
+            "asset" => ["A", "A", "A"],
+            "time" => [1i64, 2, 3],
+            "industry" => ["tech", "finance", "tech"],
+            "sector" => [20i32, 10, 20],
+        )?;
+        let groups = BTreeSet::from(["industry".to_string(), "sector".to_string()]);
+
+        let cs = build_cellset_with_groups(&df, &options(), &BTreeSet::new(), &groups)?;
+
+        assert_eq!(cs.groups["industry"].as_slice(), [0, 1, 0]);
+        assert_eq!(cs.groups["sector"].as_slice(), [20, 10, 20]);
+        Ok(())
+    }
+
+    #[test]
+    fn build_cellset_rejects_float_null_and_out_of_range_groups() {
+        let groups = BTreeSet::from(["group".to_string()]);
+        let float_group = df!(
+            "asset" => ["A"], "time" => [1i64], "group" => [1.0f64],
+        )
+        .unwrap();
+        assert!(matches!(
+            build_cellset_with_groups(&float_group, &options(), &BTreeSet::new(), &groups)
+                .unwrap_err(),
+            QWeaveError::DTypeMismatch { .. }
+        ));
+
+        let null_group = df!(
+            "asset" => ["A"], "time" => [1i64], "group" => [None::<&str>],
+        )
+        .unwrap();
+        assert!(matches!(
+            build_cellset_with_groups(&null_group, &options(), &BTreeSet::new(), &groups)
+                .unwrap_err(),
+            QWeaveError::GroupNull(_)
+        ));
+
+        assert!(matches!(
+            integer_to_i32("group", AnyValue::Int64(i64::from(i32::MAX) + 1)).unwrap_err(),
+            QWeaveError::GroupValueOutOfRange { .. }
+        ));
+        assert!(matches!(
+            integer_to_i32("group", AnyValue::UInt64(u64::MAX)).unwrap_err(),
+            QWeaveError::GroupValueOutOfRange { .. }
+        ));
+    }
+
+    #[test]
     fn build_cellset_rejects_duplicate_symbol_time() {
         let df = df!(
             "asset" => ["A", "A"],
@@ -361,7 +509,7 @@ mod tests {
         let wrong_dtype = df!(
             "asset" => ["A"],
             "time" => [1i64],
-            "open" => [1i64],
+            "open" => [true],
         )
         .unwrap();
         let err = build_cellset(&wrong_dtype, &options(), &fields).unwrap_err();

@@ -49,7 +49,7 @@ For custom expressions, see [Python Expression API](expression_api.en.md).
   `returns` is derived from `close`.
 - Tier B: Tier A plus any referenced `vwap` or `cap`; `adv{d}` is derived from
   `volume`.
-- Tier C: numeric group classification columns: `sector`, `industry`, or
+- Tier C: non-null String or integer group classification columns: `sector`, `industry`, or
   `subindustry`.
 
 If you only have basic OHLCV data, start with Tier A alphas. Add Tier B/Tier C

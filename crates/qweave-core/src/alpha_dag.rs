@@ -66,8 +66,8 @@ enum Node {
     Covariance(NodeId, NodeId, usize),
     Rank(NodeId),
     Scale(NodeId, u64),
-    GroupRank(NodeId, NodeId),
-    GroupNeutralize(NodeId, NodeId),
+    GroupRank(NodeId, String),
+    GroupNeutralize(NodeId, String),
     Abs(NodeId),
     Log(NodeId),
     Sign(NodeId),
@@ -143,8 +143,6 @@ impl Node {
             | Node::Div(lhs, rhs)
             | Node::Correlation(lhs, rhs, _)
             | Node::Covariance(lhs, rhs, _)
-            | Node::GroupRank(lhs, rhs)
-            | Node::GroupNeutralize(lhs, rhs)
             | Node::SignedPower(lhs, rhs)
             | Node::Power(lhs, rhs)
             | Node::Min(lhs, rhs)
@@ -153,6 +151,7 @@ impl Node {
                 visit(*lhs);
                 visit(*rhs);
             }
+            Node::GroupRank(values, _) | Node::GroupNeutralize(values, _) => visit(*values),
             Node::Where(cond, when_true, when_false) => {
                 visit(*cond);
                 visit(*when_true);
@@ -199,9 +198,9 @@ impl Node {
             Node::Covariance(lhs, rhs, days) => Node::Covariance(map(*lhs), map(*rhs), *days),
             Node::Rank(inner) => Node::Rank(map(*inner)),
             Node::Scale(inner, scale_to) => Node::Scale(map(*inner), *scale_to),
-            Node::GroupRank(values, groups) => Node::GroupRank(map(*values), map(*groups)),
+            Node::GroupRank(values, groups) => Node::GroupRank(map(*values), groups.clone()),
             Node::GroupNeutralize(values, groups) => {
-                Node::GroupNeutralize(map(*values), map(*groups))
+                Node::GroupNeutralize(map(*values), groups.clone())
             }
             Node::Abs(inner) => Node::Abs(map(*inner)),
             Node::Log(inner) => Node::Log(map(*inner)),
@@ -312,17 +311,21 @@ impl Dag {
             }
             Expr::GroupRank(values, groups) => {
                 let values = self.lower_to(values, Layout::Tn);
-                let groups = self.lower_to(groups, Layout::Tn);
+                let Expr::Field(groups) = groups.as_ref() else {
+                    unreachable!("group expression validated before DAG lowering")
+                };
                 self.intern(
-                    Node::GroupRank(values, groups),
+                    Node::GroupRank(values, groups.clone()),
                     ValueLayout::Cells(Layout::Tn),
                 )
             }
             Expr::GroupNeutralize(values, groups) => {
                 let values = self.lower_to(values, Layout::Tn);
-                let groups = self.lower_to(groups, Layout::Tn);
+                let Expr::Field(groups) = groups.as_ref() else {
+                    unreachable!("group expression validated before DAG lowering")
+                };
                 self.intern(
-                    Node::GroupNeutralize(values, groups),
+                    Node::GroupNeutralize(values, groups.clone()),
                     ValueLayout::Cells(Layout::Tn),
                 )
             }
@@ -599,13 +602,12 @@ impl Dag {
                 Node::Scale(inner, scale_to) => {
                     Node::Scale(self.bypass_lone_transpose(*inner, &counts), *scale_to)
                 }
-                Node::GroupRank(values, groups) => Node::GroupRank(
-                    self.bypass_lone_transpose(*values, &counts),
-                    self.bypass_lone_transpose(*groups, &counts),
-                ),
+                Node::GroupRank(values, groups) => {
+                    Node::GroupRank(self.bypass_lone_transpose(*values, &counts), groups.clone())
+                }
                 Node::GroupNeutralize(values, groups) => Node::GroupNeutralize(
                     self.bypass_lone_transpose(*values, &counts),
-                    self.bypass_lone_transpose(*groups, &counts),
+                    groups.clone(),
                 ),
                 _ => continue,
             };
@@ -968,16 +970,20 @@ impl Dag {
                     scale(values, input_layout, output, f64::from_bits(scale_to), cs)
                 },
             ),
-            Node::GroupRank(values, groups) => eval_xs_binary(
+            Node::GroupRank(values, ref groups) => eval_xs_binary(
                 slot_value(slots, values),
-                slot_value(slots, groups),
+                cs.groups
+                    .get(groups)
+                    .expect("group loaded before evaluation"),
                 self.cells_layout(id),
                 cs,
                 group_rank,
             ),
-            Node::GroupNeutralize(values, groups) => eval_xs_binary(
+            Node::GroupNeutralize(values, ref groups) => eval_xs_binary(
                 slot_value(slots, values),
-                slot_value(slots, groups),
+                cs.groups
+                    .get(groups)
+                    .expect("group loaded before evaluation"),
                 self.cells_layout(id),
                 cs,
                 group_neutralize,
@@ -1330,19 +1336,18 @@ fn eval_xs_unary(
 /// native layout and the result is emitted directly in `output`.
 fn eval_xs_binary(
     values: &DagVal,
-    groups: &DagVal,
+    groups: &[i32],
     output: Layout,
     cs: &CellSet,
-    kernel: impl FnOnce(&[f64], Layout, &[f64], Layout, Layout, &CellSet) -> Vec<f64>,
+    kernel: impl FnOnce(&[f64], Layout, &[i32], Layout, Layout, &CellSet) -> Vec<f64>,
 ) -> DagVal {
     let (values, values_layout) = cells_and_layout(values, cs);
-    let (groups, groups_layout) = cells_and_layout(groups, cs);
     DagVal::Cells {
         values: Arc::new(kernel(
             &values,
             values_layout,
-            &groups,
-            groups_layout,
+            groups,
+            Layout::Nt,
             output,
             cs,
         )),
@@ -1427,12 +1432,20 @@ mod tests {
     use crate::alpha_eval::{eval, to_cells as tree_to_cells};
 
     fn test_cellset_fields(
-        fields: HashMap<String, Vec<f64>>,
+        mut fields: HashMap<String, Vec<f64>>,
         sym_blocks: Vec<Range<usize>>,
         time_blocks: Vec<Range<usize>>,
         tn_order: Vec<usize>,
     ) -> CellSet {
         let n_cells = fields.values().next().map_or(0, Vec::len);
+        let groups = fields
+            .remove("industry")
+            .map_or_else(HashMap::new, |values| {
+                HashMap::from([(
+                    "industry".to_string(),
+                    Arc::new(values.into_iter().map(|v| v as i32).collect()),
+                )])
+            });
         CellSet {
             n_cells,
             sym_blocks,
@@ -1443,6 +1456,7 @@ mod tests {
                 .into_iter()
                 .map(|(name, values)| (name, Arc::new(values)))
                 .collect(),
+            groups,
             symbols_tn: Column::new("asset".into(), vec!["A"; n_cells]),
             times_tn: Column::new("time".into(), (0..n_cells as i64).collect::<Vec<_>>()),
             time_block_by_value: HashMap::new(),

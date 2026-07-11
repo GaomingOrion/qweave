@@ -391,7 +391,7 @@ def _alpha_input_frame():
                 "high": 25.0,
                 "low": 20.0,
                 "volume": 110.0,
-                "industry": 1.0,
+                "industry": 1,
             },
             {
                 "asset": "A",
@@ -401,7 +401,7 @@ def _alpha_input_frame():
                 "high": 12.0,
                 "low": 9.0,
                 "volume": 100.0,
-                "industry": 0.0,
+                "industry": 0,
             },
             {
                 "asset": "A",
@@ -411,7 +411,7 @@ def _alpha_input_frame():
                 "high": 16.0,
                 "low": 11.0,
                 "volume": 120.0,
-                "industry": 0.0,
+                "industry": 0,
             },
             {
                 "asset": "B",
@@ -421,7 +421,7 @@ def _alpha_input_frame():
                 "high": 22.0,
                 "low": 19.0,
                 "volume": 90.0,
-                "industry": 1.0,
+                "industry": 1,
             },
         ]
     )
@@ -446,9 +446,9 @@ def _worldquant_input_frame(n_times):
                     "volume": 1_000.0 + asset_idx * 17.0 + time * 3.0,
                     "vwap": (high + low + close) / 3.0,
                     "cap": close * (1_000_000.0 + asset_idx * 100_000.0),
-                    "sector": float(asset_idx % 2),
-                    "industry": float(asset_idx % 2),
-                    "subindustry": float(asset_idx % 2),
+                    "sector": asset_idx % 2,
+                    "industry": asset_idx % 2,
+                    "subindustry": asset_idx % 2,
                 }
             )
     return pl.DataFrame(rows)

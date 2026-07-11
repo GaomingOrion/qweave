@@ -103,7 +103,7 @@ common reference diverges. Useful when reconciling qweave against another engine
   `alpha85`, `alpha86`, `alpha88`, `alpha89`, `alpha94`, `alpha95`, `alpha96`,
   `alpha98`, `alpha99`.
 
-- C: formulas requiring numeric group classification columns.
+- C: formulas requiring non-null String or integer group classification columns.
   `alpha48` requires `subindustry`.
   `alpha58` requires `sector`.
   `alpha59`, `alpha63`, `alpha69`, `alpha70`, `alpha80`, `alpha87`, `alpha91`,

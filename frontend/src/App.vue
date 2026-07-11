@@ -13,6 +13,7 @@ const bundle = ref<FactorBundle | null>(null);
 const tab = ref<"returns" | "ic">("returns");
 const error = ref("");
 const loading = ref(false);
+const stopped = ref(false);
 
 onMounted(async () => {
   try {
@@ -36,11 +37,23 @@ async function selectFactor(name: string) {
     loading.value = false;
   }
 }
+
+async function stopServer() {
+  try {
+    await api.shutdown();
+    stopped.value = true;
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 </script>
 
 <template>
   <header>
-    <h1>qweave evaluation</h1>
+    <div class="title-row">
+      <h1>qweave evaluation</h1>
+      <button class="stop" :disabled="stopped" @click="stopServer">停止服务</button>
+    </div>
     <div class="sub muted" v-if="meta">
       {{ meta.factors.length }} factors · horizons {{ meta.horizons.join(", ") }} ·
       {{ meta.quantiles }} quantiles · {{ meta.binning }} binning · {{ meta.n_days }} days
@@ -56,7 +69,12 @@ async function selectFactor(name: string) {
     </div>
   </header>
 
-  <main>
+  <main v-if="stopped" class="stopped">
+    <h2>服务已停止</h2>
+    <p class="muted">可以关闭此页面。</p>
+  </main>
+
+  <main v-else>
     <p v-if="error" class="error">{{ error }}</p>
 
     <SummaryTable
@@ -97,6 +115,17 @@ async function selectFactor(name: string) {
 header {
   padding: 18px 24px;
   border-bottom: 1px solid var(--line);
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.stop {
+  color: var(--neg);
+}
+.stopped {
+  display: block;
 }
 .sub {
   font-size: 13px;

@@ -6,10 +6,10 @@ use rayon::prelude::*;
 
 use crate::alpha_dag::eval_exprs as eval_exprs_dag;
 use crate::alpha_eval::{eval, to_cells};
-use crate::cellset::{CellSet, PanelOptions, build_cellset};
+use crate::cellset::{CellSet, PanelOptions, build_cellset_with_groups};
 use crate::compute_sink::{ComputeResult, ComputeSink};
 use crate::error::{QWeaveError, Result};
-use crate::expr::{Expr, collect_fields};
+use crate::expr::{Expr, collect_fields, collect_group_fields};
 use crate::layout::Layout;
 
 enum AlphaEngine {
@@ -24,7 +24,8 @@ pub fn compute_alphas(
     output_path: Option<&str>,
 ) -> Result<ComputeResult> {
     let (names, exprs) = prepare_alphas(&options, alphas, &HashSet::new())?;
-    let cs = build_cellset(&df, &options, &fields_for(&exprs))?;
+    let (fields, groups) = fields_for(&exprs)?;
+    let cs = build_cellset_with_groups(&df, &options, &fields, &groups)?;
     let values = eval_exprs(&cs, &exprs)?;
     let frame = build_full_frame(&cs, names.into_iter().zip(values).collect(), &options)?;
 
@@ -49,7 +50,8 @@ pub fn with_alphas(
         .map(|name| name.to_string())
         .collect::<HashSet<_>>();
     let (names, exprs) = prepare_alphas(&options, alphas, &input_names)?;
-    let cs = build_cellset(&df, &options, &fields_for(&exprs))?;
+    let (fields, groups) = fields_for(&exprs)?;
+    let cs = build_cellset_with_groups(&df, &options, &fields, &groups)?;
     let values = eval_exprs(&cs, &exprs)?;
 
     let mut columns = Vec::with_capacity(names.len());
@@ -126,12 +128,15 @@ fn ensure_output_name_available(
     Ok(())
 }
 
-fn fields_for(exprs: &[Expr]) -> BTreeSet<String> {
+fn fields_for(exprs: &[Expr]) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
     let mut fields = BTreeSet::new();
+    let mut groups = BTreeSet::new();
     for expr in exprs {
         collect_fields(expr, &mut fields);
+        collect_group_fields(expr, &mut groups)?;
     }
-    fields
+    fields.retain(|field| !groups.contains(field));
+    Ok((fields, groups))
 }
 
 /// Assemble the full-panel output by moving each alpha's Tn vector into a column
@@ -219,6 +224,48 @@ mod tests {
                 .collect::<Vec<_>>(),
             [10.0, 11.0, 20.0]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn string_and_integer_group_columns_produce_matching_results() -> Result<()> {
+        let df = df!(
+            "asset" => ["A", "B", "C", "D"],
+            "time" => [1i64, 1, 1, 1],
+            "close" => [1.0, 3.0, 2.0, 6.0],
+            "industry_str" => ["x", "x", "y", "y"],
+            "industry_int" => [10i64, 10, 20, 20],
+        )?;
+        let close = || Box::new(Expr::Field("close".to_string()));
+        let group = |name: &str| Box::new(Expr::Field(name.to_string()));
+        let out = with_alphas(
+            df,
+            options(),
+            vec![
+                (
+                    "neutral_str".into(),
+                    Expr::GroupNeutralize(close(), group("industry_str")),
+                ),
+                (
+                    "neutral_int".into(),
+                    Expr::GroupNeutralize(close(), group("industry_int")),
+                ),
+                (
+                    "rank_str".into(),
+                    Expr::GroupRank(close(), group("industry_str")),
+                ),
+                (
+                    "rank_int".into(),
+                    Expr::GroupRank(close(), group("industry_int")),
+                ),
+            ],
+        )?;
+
+        assert!(
+            out.column("neutral_str")?
+                .equals(out.column("neutral_int")?)
+        );
+        assert!(out.column("rank_str")?.equals(out.column("rank_int")?));
         Ok(())
     }
 
