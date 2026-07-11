@@ -171,15 +171,16 @@ JIT 编译）：
 
 1. [可运行示例](examples/README.md)
 2. [Python 表达式 API](docs/expression_api.md)
-3. [WorldQuant 101](docs/worldquant_alpha101.md) / [Qlib Alpha158](docs/qlib_alpha158.md)
+3. [WorldQuant 101](docs/worldquant_alpha101.md) / [Qlib Alpha158](docs/qlib_alpha158.md) /
+   [国泰君安 Alpha191](docs/gtja_alpha191.md)
 4. [因子评估](docs/factor_evaluation.md)
 5. [架构](docs/architecture.md) / [性能与基准测试](docs/benchmark.md)
 
 ## 项目状态
 
 qweave 的因子计算、标签、评估和报告链路已经可用，API 处于 pre-1.0 阶段。
-欢迎阅读 [CONTRIBUTING](CONTRIBUTING.md) 参与开发。项目与 WorldQuant、Microsoft、
-Qlib 或 KunQuant 没有关联。
+欢迎阅读 [CONTRIBUTING](CONTRIBUTING.md) 参与开发。项目与国泰君安证券、WorldQuant、
+Microsoft、Qlib 或 KunQuant 没有关联。
 
 ## License
 

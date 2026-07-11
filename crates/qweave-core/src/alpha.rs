@@ -126,6 +126,30 @@ pub fn ts_std(x: Expr, d: usize) -> Expr {
     Expr::TsStd(Box::new(x), d)
 }
 
+pub fn sma(x: Expr, d: usize, m: usize) -> Expr {
+    Expr::Sma(Box::new(x), d, m)
+}
+
+pub fn wma(x: Expr, d: usize) -> Expr {
+    Expr::Wma(Box::new(x), d)
+}
+
+pub fn rolling_beta(y: Expr, x: Expr, d: usize) -> Expr {
+    Expr::RollingBeta(Box::new(y), Box::new(x), d)
+}
+
+pub fn conditional_beta(y: Expr, x: Expr, cond: Expr, d: usize) -> Expr {
+    Expr::ConditionalBeta(Box::new(y), Box::new(x), Box::new(cond), d)
+}
+
+pub fn multi_resi(y: Expr, x1: Expr, x2: Expr, x3: Expr, d: usize) -> Expr {
+    Expr::MultiResi(Box::new(y), Box::new(x1), Box::new(x2), Box::new(x3), d)
+}
+
+pub fn scan_mul(value: Expr, cond: Expr) -> Expr {
+    Expr::ScanMul(Box::new(value), Box::new(cond))
+}
+
 pub fn slope(x: Expr, d: usize) -> Expr {
     Expr::Slope(Box::new(x), d)
 }

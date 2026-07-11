@@ -10,9 +10,11 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+pub mod gtja_alpha191;
 pub mod qlib_alpha158;
 pub mod worldquant_alpha101;
 
+pub use gtja_alpha191::gtja_alpha191;
 pub use qlib_alpha158::qlib_alpha158;
 pub use worldquant_alpha101::worldquant_alpha101;
 
@@ -58,6 +60,18 @@ mod tests {
     }
 
     #[test]
+    fn gtja_alpha191_builder_returns_exact_name_set() {
+        let names = gtja_alpha191()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        let expected = (1..=191)
+            .map(|idx| format!("gtja_alpha{idx:03}"))
+            .collect::<Vec<_>>();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
     fn worldquant_alpha101_alphas_run_on_complete_synthetic_panel() -> qweave_core::Result<()> {
         let alpha_names = (1..=101)
             .map(|idx| format!("alpha{idx}"))
@@ -82,6 +96,31 @@ mod tests {
             time_asset_rows(&out)?,
             (0..n_symbols)
                 .map(|symbol_idx| (n_times as i64, format!("S{symbol_idx:04}")))
+                .collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gtja_alpha191_alphas_run_on_complete_synthetic_panel() -> qweave_core::Result<()> {
+        let alphas = gtja_alpha191();
+        let names = alphas
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let out = memory_frame(compute_alphas(
+            synthetic_alpha_bench_frame(6, 320)?,
+            options(),
+            alphas,
+            None,
+        )?)?;
+
+        assert_eq!(out.height(), 6 * 320);
+        assert_eq!(
+            column_names(&out),
+            ["time".to_string(), "asset".to_string()]
+                .into_iter()
+                .chain(names)
                 .collect::<Vec<_>>()
         );
         Ok(())
@@ -416,6 +455,44 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn gtja_alpha191_golden_matches_frozen_baseline() -> qweave_core::Result<()> {
+        let n_symbols = 12;
+        let n_times = 320;
+        let df = synthetic_alpha_bench_frame(n_symbols, n_times)?;
+        let mut out = memory_frame(compute_alphas(df, options(), gtja_alpha191(), None)?)?;
+        out = sample_observation_times(
+            out,
+            "time",
+            Series::new(
+                "time".into(),
+                [(n_times - 2) as i64, (n_times - 1) as i64, n_times as i64],
+            ),
+        )?;
+
+        let fixture = format!(
+            "{}/tests/fixtures/golden_gtja_alpha191.parquet",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        if env::var("GTJA_GOLDEN_BLESS").is_ok() {
+            let file = std::fs::File::create(&fixture).expect("create GTJA golden fixture");
+            ParquetWriter::new(file)
+                .finish(&mut out)
+                .expect("write GTJA golden fixture");
+            println!("blessed GTJA Alpha191 golden fixture: {fixture}");
+            return Ok(());
+        }
+
+        let baseline = ParquetReader::new(
+            std::fs::File::open(&fixture)
+                .expect("GTJA golden fixture exists (run once with GTJA_GOLDEN_BLESS=1)"),
+        )
+        .finish()
+        .expect("read GTJA golden fixture");
+        assert_golden_within_tol(&out, &baseline, 1e-8, 1e-8);
+        Ok(())
+    }
+
     fn assert_golden_within_tol(actual: &DataFrame, baseline: &DataFrame, atol: f64, rtol: f64) {
         assert_eq!(
             column_names(actual),
@@ -550,6 +627,11 @@ mod tests {
         let mut sector = Vec::with_capacity(n_rows);
         let mut industry = Vec::with_capacity(n_rows);
         let mut subindustry = Vec::with_capacity(n_rows);
+        let mut index_open = Vec::with_capacity(n_rows);
+        let mut index_close = Vec::with_capacity(n_rows);
+        let mut mkt = Vec::with_capacity(n_rows);
+        let mut smb = Vec::with_capacity(n_rows);
+        let mut hml = Vec::with_capacity(n_rows);
 
         for symbol_idx in 0..n_symbols {
             for time_idx in 1..=n_times {
@@ -590,6 +672,11 @@ mod tests {
                 sector.push((symbol_idx % 2) as i32);
                 industry.push((symbol_idx % 3) as i32);
                 subindustry.push((symbol_idx % 3) as i32);
+                index_open.push(3_000.0 + time * 0.4);
+                index_close.push(3_000.0 + time * 0.4 + ((time_idx % 5) as f64 - 2.0));
+                mkt.push((time_idx % 17) as f64 * 0.001);
+                smb.push((time_idx % 7) as f64 * 0.001 - 0.003);
+                hml.push((time_idx % 11) as f64 * 0.0007 - 0.0035);
             }
         }
 
@@ -606,6 +693,11 @@ mod tests {
             "sector" => sector,
             "industry" => industry,
             "subindustry" => subindustry,
+            "index_open" => index_open,
+            "index_close" => index_close,
+            "mkt" => mkt,
+            "smb" => smb,
+            "hml" => hml,
         )?)
     }
 

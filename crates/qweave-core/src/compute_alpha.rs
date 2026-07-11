@@ -69,9 +69,63 @@ pub fn with_alphas(
 }
 
 pub fn eval_exprs(cs: &CellSet, exprs: &[Expr]) -> Result<Vec<Vec<f64>>> {
+    if exprs.iter().any(requires_tree_engine) {
+        return eval_exprs_tree(exprs, cs);
+    }
     match alpha_engine()? {
         AlphaEngine::Tree => eval_exprs_tree(exprs, cs),
         AlphaEngine::Dag => eval_exprs_dag(exprs, cs),
+    }
+}
+
+fn requires_tree_engine(expr: &Expr) -> bool {
+    match expr {
+        Expr::Sma(_, _, _)
+        | Expr::Wma(_, _)
+        | Expr::RollingBeta(_, _, _)
+        | Expr::ConditionalBeta(_, _, _, _)
+        | Expr::MultiResi(_, _, _, _, _)
+        | Expr::ScanMul(_, _) => true,
+        Expr::Field(_) | Expr::Const(_) => false,
+        Expr::Where(a, b, c) => {
+            requires_tree_engine(a) || requires_tree_engine(b) || requires_tree_engine(c)
+        }
+        Expr::Add(a, b)
+        | Expr::Sub(a, b)
+        | Expr::Mul(a, b)
+        | Expr::Div(a, b)
+        | Expr::Min(a, b)
+        | Expr::Max(a, b)
+        | Expr::Cmp(_, a, b)
+        | Expr::GroupRank(a, b)
+        | Expr::GroupNeutralize(a, b)
+        | Expr::Correlation(a, b, _)
+        | Expr::Covariance(a, b, _)
+        | Expr::SignedPower(a, b)
+        | Expr::Power(a, b) => requires_tree_engine(a) || requires_tree_engine(b),
+        Expr::Neg(x)
+        | Expr::Delay(x, _)
+        | Expr::Delta(x, _)
+        | Expr::TsSum(x, _)
+        | Expr::TsMean(x, _)
+        | Expr::Product(x, _)
+        | Expr::TsMin(x, _)
+        | Expr::TsMax(x, _)
+        | Expr::TsArgMin(x, _)
+        | Expr::TsArgMax(x, _)
+        | Expr::TsRank(x, _)
+        | Expr::TsRankRaw(x, _)
+        | Expr::TsStd(x, _)
+        | Expr::Slope(x, _)
+        | Expr::Rsquare(x, _)
+        | Expr::Resi(x, _)
+        | Expr::Quantile(x, _, _)
+        | Expr::DecayLinear(x, _)
+        | Expr::Rank(x)
+        | Expr::Scale(x, _)
+        | Expr::Abs(x)
+        | Expr::Log(x)
+        | Expr::Sign(x) => requires_tree_engine(x),
     }
 }
 

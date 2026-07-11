@@ -201,7 +201,8 @@ Follow the [documentation home](docs/index.en.md) in order:
 
 1. [Runnable example](examples/README.en.md)
 2. [Python Expression API](docs/expression_api.en.md)
-3. [WorldQuant 101](docs/worldquant_alpha101.en.md) / [Qlib Alpha158](docs/qlib_alpha158.en.md)
+3. [WorldQuant 101](docs/worldquant_alpha101.en.md) / [Qlib Alpha158](docs/qlib_alpha158.en.md) /
+   [Guotai Junan Alpha191](docs/gtja_alpha191.en.md)
 4. [Factor Evaluation](docs/factor_evaluation.en.md)
 5. [Architecture](docs/architecture.en.md) / [Benchmarks](docs/benchmark.en.md)
 
@@ -211,7 +212,8 @@ The factor-computation, labeling, evaluation, and reporting workflow is usable
 today, while the API remains pre-1.0.
 
 See [CONTRIBUTING](CONTRIBUTING.en.md) to contribute. This project is not
-affiliated with WorldQuant, Microsoft, Qlib, or KunQuant.
+affiliated with Guotai Junan Securities, WorldQuant, Microsoft, Qlib, or
+KunQuant.
 
 ## License
 

@@ -16,8 +16,9 @@ runnable [example](../examples/README.en.md).
 
 1. **Install and run the complete example:** [README quickstart](../README.en.md#from-market-data-to-a-factor-report).
 2. **Build and compose factors:** [Python Expression API](expression_api.en.md).
-3. **Use classic factor libraries:** [WorldQuant 101](worldquant_alpha101.en.md)
-   and [Qlib Alpha158](qlib_alpha158.en.md).
+3. **Use classic factor libraries:** [WorldQuant 101](worldquant_alpha101.en.md),
+   [Qlib Alpha158](qlib_alpha158.en.md), and
+   [Guotai Junan Alpha191](gtja_alpha191.en.md).
 4. **Create labels and evaluate factors:** [Factor Evaluation](factor_evaluation.en.md).
 5. **Understand execution:** [Architecture and Design Tradeoffs](architecture.en.md).
 6. **Run large workloads:** [Benchmarks](benchmark.en.md).

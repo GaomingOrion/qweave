@@ -123,6 +123,26 @@ def test_qlib_alpha158_rejects_unknown_names():
         qweave.qlib_alpha158({}, alphas=["NOT_A_FACTOR"])
 
 
+def test_gtja_alpha191_returns_padded_names_subset_and_aliases():
+    selected = qweave.gtja_alpha191(
+        {"close": "adj_close"},
+        alphas=["gtja_alpha001", "gtja_alpha191"],
+    )
+    all_exprs = qweave.gtja_alpha191({})
+
+    assert [expr.output_name() for expr in selected] == [
+        "gtja_alpha001",
+        "gtja_alpha191",
+    ]
+    assert [expr.output_name() for expr in all_exprs] == [
+        f"gtja_alpha{idx:03}" for idx in range(1, 192)
+    ]
+    assert "adj_close" in selected[0].collect_inputs()
+
+    with pytest.raises(ValueError, match="factor `gtja_alpha1` is not known"):
+        qweave.gtja_alpha191({}, alphas=["gtja_alpha1"])
+
+
 def test_compute_alphas_alpha101_matches_python_baseline():
     df = _alpha_input_frame()
 

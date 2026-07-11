@@ -150,3 +150,7 @@ def qlib_alpha158(
     input_alias: dict[str, str],
     alphas: Sequence[str] | None = None,
 ) -> list[PyExpr]: ...
+def gtja_alpha191(
+    input_alias: dict[str, str],
+    alphas: Sequence[str] | None = None,
+) -> list[PyExpr]: ...

@@ -33,6 +33,8 @@ pub enum Expr {
     TsRank(Box<Expr>, usize),
     TsRankRaw(Box<Expr>, usize),
     TsStd(Box<Expr>, usize),
+    Sma(Box<Expr>, usize, usize),
+    Wma(Box<Expr>, usize),
     Slope(Box<Expr>, usize),
     Rsquare(Box<Expr>, usize),
     Resi(Box<Expr>, usize),
@@ -40,6 +42,10 @@ pub enum Expr {
     DecayLinear(Box<Expr>, usize),
     Correlation(Box<Expr>, Box<Expr>, usize),
     Covariance(Box<Expr>, Box<Expr>, usize),
+    RollingBeta(Box<Expr>, Box<Expr>, usize),
+    ConditionalBeta(Box<Expr>, Box<Expr>, Box<Expr>, usize),
+    MultiResi(Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>, usize),
+    ScanMul(Box<Expr>, Box<Expr>),
     Rank(Box<Expr>),
     Scale(Box<Expr>, f64),
     GroupRank(Box<Expr>, Box<Expr>),
@@ -77,6 +83,8 @@ impl fmt::Display for Expr {
             Expr::TsRank(inner, days) => write!(f, "ts_rank({inner}, {days})"),
             Expr::TsRankRaw(inner, days) => write!(f, "ts_rank_raw({inner}, {days})"),
             Expr::TsStd(inner, days) => write!(f, "ts_std({inner}, {days})"),
+            Expr::Sma(inner, days, weight) => write!(f, "sma({inner}, {days}, {weight})"),
+            Expr::Wma(inner, days) => write!(f, "wma({inner}, {days})"),
             Expr::Slope(inner, days) => write!(f, "slope({inner}, {days})"),
             Expr::Rsquare(inner, days) => write!(f, "rsquare({inner}, {days})"),
             Expr::Resi(inner, days) => write!(f, "resi({inner}, {days})"),
@@ -84,6 +92,14 @@ impl fmt::Display for Expr {
             Expr::DecayLinear(inner, days) => write!(f, "decay_linear({inner}, {days})"),
             Expr::Correlation(lhs, rhs, days) => write!(f, "correlation({lhs}, {rhs}, {days})"),
             Expr::Covariance(lhs, rhs, days) => write!(f, "covariance({lhs}, {rhs}, {days})"),
+            Expr::RollingBeta(lhs, rhs, days) => write!(f, "rolling_beta({lhs}, {rhs}, {days})"),
+            Expr::ConditionalBeta(lhs, rhs, cond, days) => {
+                write!(f, "conditional_beta({lhs}, {rhs}, {cond}, {days})")
+            }
+            Expr::MultiResi(y, x1, x2, x3, days) => {
+                write!(f, "multi_resi({y}, {x1}, {x2}, {x3}, {days})")
+            }
+            Expr::ScanMul(value, cond) => write!(f, "scan_mul({value}, {cond})"),
             Expr::Rank(inner) => write!(f, "rank({inner})"),
             Expr::Scale(inner, scale_to) => write!(f, "scale({inner}, {scale_to})"),
             Expr::GroupRank(values, groups) => write!(f, "group_rank({values}, {groups})"),
@@ -141,6 +157,8 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::Cmp(_, lhs, rhs)
         | Expr::Correlation(lhs, rhs, _)
         | Expr::Covariance(lhs, rhs, _)
+        | Expr::RollingBeta(lhs, rhs, _)
+        | Expr::ScanMul(lhs, rhs)
         | Expr::SignedPower(lhs, rhs)
         | Expr::Power(lhs, rhs) => {
             collect_group_fields(lhs, out)?;
@@ -150,6 +168,17 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
             collect_group_fields(cond, out)?;
             collect_group_fields(when_true, out)?;
             collect_group_fields(when_false, out)?;
+        }
+        Expr::ConditionalBeta(lhs, rhs, cond, _) => {
+            collect_group_fields(lhs, out)?;
+            collect_group_fields(rhs, out)?;
+            collect_group_fields(cond, out)?;
+        }
+        Expr::MultiResi(y, x1, x2, x3, _) => {
+            collect_group_fields(y, out)?;
+            collect_group_fields(x1, out)?;
+            collect_group_fields(x2, out)?;
+            collect_group_fields(x3, out)?;
         }
         Expr::Neg(inner)
         | Expr::Delay(inner, _)
@@ -164,6 +193,8 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
         | Expr::TsStd(inner, _)
+        | Expr::Sma(inner, _, _)
+        | Expr::Wma(inner, _)
         | Expr::Slope(inner, _)
         | Expr::Rsquare(inner, _)
         | Expr::Resi(inner, _)
@@ -196,10 +227,23 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::GroupNeutralize(lhs, rhs)
         | Expr::Correlation(lhs, rhs, _)
         | Expr::Covariance(lhs, rhs, _)
+        | Expr::RollingBeta(lhs, rhs, _)
+        | Expr::ScanMul(lhs, rhs)
         | Expr::SignedPower(lhs, rhs)
         | Expr::Power(lhs, rhs) => {
             visit_fields(lhs, visit);
             visit_fields(rhs, visit);
+        }
+        Expr::ConditionalBeta(lhs, rhs, cond, _) => {
+            visit_fields(lhs, visit);
+            visit_fields(rhs, visit);
+            visit_fields(cond, visit);
+        }
+        Expr::MultiResi(y, x1, x2, x3, _) => {
+            visit_fields(y, visit);
+            visit_fields(x1, visit);
+            visit_fields(x2, visit);
+            visit_fields(x3, visit);
         }
         Expr::Where(cond, when_true, when_false) => {
             visit_fields(cond, visit);
@@ -219,6 +263,8 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
         | Expr::TsStd(inner, _)
+        | Expr::Sma(inner, _, _)
+        | Expr::Wma(inner, _)
         | Expr::Slope(inner, _)
         | Expr::Rsquare(inner, _)
         | Expr::Resi(inner, _)
@@ -255,6 +301,10 @@ pub fn rename_fields(expr: &Expr, names: &BTreeMap<String, String>) -> Expr {
         Expr::TsRank(inner, days) => unary_window(inner, *days, names, Expr::TsRank),
         Expr::TsRankRaw(inner, days) => unary_window(inner, *days, names, Expr::TsRankRaw),
         Expr::TsStd(inner, days) => unary_window(inner, *days, names, Expr::TsStd),
+        Expr::Sma(inner, days, weight) => {
+            Expr::Sma(Box::new(rename_fields(inner, names)), *days, *weight)
+        }
+        Expr::Wma(inner, days) => unary_window(inner, *days, names, Expr::Wma),
         Expr::Slope(inner, days) => unary_window(inner, *days, names, Expr::Slope),
         Expr::Rsquare(inner, days) => unary_window(inner, *days, names, Expr::Rsquare),
         Expr::Resi(inner, days) => unary_window(inner, *days, names, Expr::Resi),
@@ -266,6 +316,23 @@ pub fn rename_fields(expr: &Expr, names: &BTreeMap<String, String>) -> Expr {
             binary_window(lhs, rhs, *days, names, Expr::Correlation)
         }
         Expr::Covariance(lhs, rhs, days) => binary_window(lhs, rhs, *days, names, Expr::Covariance),
+        Expr::RollingBeta(lhs, rhs, days) => {
+            binary_window(lhs, rhs, *days, names, Expr::RollingBeta)
+        }
+        Expr::ConditionalBeta(lhs, rhs, cond, days) => Expr::ConditionalBeta(
+            Box::new(rename_fields(lhs, names)),
+            Box::new(rename_fields(rhs, names)),
+            Box::new(rename_fields(cond, names)),
+            *days,
+        ),
+        Expr::MultiResi(y, x1, x2, x3, days) => Expr::MultiResi(
+            Box::new(rename_fields(y, names)),
+            Box::new(rename_fields(x1, names)),
+            Box::new(rename_fields(x2, names)),
+            Box::new(rename_fields(x3, names)),
+            *days,
+        ),
+        Expr::ScanMul(value, cond) => binary(value, cond, names, Expr::ScanMul),
         Expr::Rank(inner) => unary(inner, names, Expr::Rank),
         Expr::Scale(inner, scale_to) => {
             Expr::Scale(Box::new(rename_fields(inner, names)), *scale_to)

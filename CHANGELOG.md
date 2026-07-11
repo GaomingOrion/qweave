@@ -5,6 +5,11 @@ All notable changes will be documented in this file.
 The project follows pre-1.0 semantic versioning: minor versions may change APIs,
 and patch versions should remain backward compatible within a minor line.
 
+## Unreleased
+
+- Added the built-in `gtja_alpha191()` collection with padded output names
+  `gtja_alpha001` through `gtja_alpha191`.
+
 ## v0.5.0 - 2026-07-11
 
 - Added non-null String and integer group columns backed by validated `i32`

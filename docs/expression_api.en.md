@@ -127,10 +127,13 @@ out = qw.compute_alphas(df, "asset", "time", alphas)
 ```
 
 `qw.qlib_alpha158(input_alias, alphas=None)` exposes the Qlib Alpha158 set with
-the same signature. Pass an empty dict for identity input mapping. See
+the same signature. `qw.gtja_alpha191(input_alias, alphas=None)` exposes Guotai
+Junan Alpha191 with padded names from `gtja_alpha001` through `gtja_alpha191`.
+Pass an empty dict for identity input mapping. See
 [WorldQuant 101](worldquant_alpha101.en.md) and
-[Qlib Alpha158](qlib_alpha158.en.md) for implementation defaults and required
-input fields.
+[Qlib Alpha158](qlib_alpha158.en.md), plus
+[Guotai Junan Alpha191](gtja_alpha191.en.md), for implementation defaults and
+required input fields.
 
 ## Next Steps
 

@@ -187,6 +187,14 @@ fn qlib_alpha158_py(
     alpha_builder_py(qweave_factors::qlib_alpha158(), input_alias, alphas)
 }
 
+#[pyfunction(name = "gtja_alpha191", signature = (input_alias, alphas = None))]
+fn gtja_alpha191_py(
+    input_alias: HashMap<String, String>,
+    alphas: Option<Vec<String>>,
+) -> PyResult<Vec<PyExpr>> {
+    alpha_builder_py(qweave_factors::gtja_alpha191(), input_alias, alphas)
+}
+
 fn alpha_builder_py(
     all: Vec<(String, Expr)>,
     input_alias: HashMap<String, String>,
@@ -255,6 +263,7 @@ fn qweave(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(eval::factor_correlation_py, module)?)?;
     module.add_function(wrap_pyfunction!(worldquant_alpha101_py, module)?)?;
     module.add_function(wrap_pyfunction!(qlib_alpha158_py, module)?)?;
+    module.add_function(wrap_pyfunction!(gtja_alpha191_py, module)?)?;
     Ok(())
 }
 

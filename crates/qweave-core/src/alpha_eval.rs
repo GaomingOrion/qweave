@@ -106,6 +106,14 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(ts_std(&values, *days, cs), Layout::Nt))
         }
+        Expr::Sma(inner, days, weight) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(sma(&values, *days, *weight, cs), Layout::Nt))
+        }
+        Expr::Wma(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(wma(&values, *days, cs), Layout::Nt))
+        }
         Expr::Slope(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(slope(&values, *days, cs), Layout::Nt))
@@ -135,6 +143,35 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
             let lhs = to_cells(eval(lhs, cs)?, Layout::Nt, cs);
             let rhs = to_cells(eval(rhs, cs)?, Layout::Nt, cs);
             Ok(owned_cells(covariance(&lhs, &rhs, *days, cs), Layout::Nt))
+        }
+        Expr::RollingBeta(lhs, rhs, days) => {
+            let lhs = to_cells(eval(lhs, cs)?, Layout::Nt, cs);
+            let rhs = to_cells(eval(rhs, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(rolling_beta(&lhs, &rhs, *days, cs), Layout::Nt))
+        }
+        Expr::ConditionalBeta(lhs, rhs, cond, days) => {
+            let lhs = to_cells(eval(lhs, cs)?, Layout::Nt, cs);
+            let rhs = to_cells(eval(rhs, cs)?, Layout::Nt, cs);
+            let cond = to_cells(eval(cond, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(
+                conditional_beta(&lhs, &rhs, &cond, *days, cs),
+                Layout::Nt,
+            ))
+        }
+        Expr::MultiResi(y, x1, x2, x3, days) => {
+            let y = to_cells(eval(y, cs)?, Layout::Nt, cs);
+            let x1 = to_cells(eval(x1, cs)?, Layout::Nt, cs);
+            let x2 = to_cells(eval(x2, cs)?, Layout::Nt, cs);
+            let x3 = to_cells(eval(x3, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(
+                multi_resi(&y, &x1, &x2, &x3, *days, cs),
+                Layout::Nt,
+            ))
+        }
+        Expr::ScanMul(value, cond) => {
+            let value = to_cells(eval(value, cs)?, Layout::Nt, cs);
+            let cond = to_cells(eval(cond, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(scan_mul(&value, &cond, cs), Layout::Nt))
         }
         Expr::Rank(inner) => {
             let values = to_cells(eval(inner, cs)?, Layout::Tn, cs);
@@ -339,6 +376,187 @@ pub(crate) fn delay(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
             *out_cell = values[block.start + local_idx - days];
         }
     })
+}
+
+pub(crate) fn sma(values: &[f64], days: usize, weight: usize, cs: &CellSet) -> Vec<f64> {
+    if days == 0 || weight > days {
+        return vec![f64::NAN; values.len()];
+    }
+    let alpha = weight as f64 / days as f64;
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
+        let mut state = f64::NAN;
+        for (local, cell) in out.iter_mut().enumerate() {
+            let value = values[block.start + local];
+            if value.is_finite() {
+                state = if state.is_finite() {
+                    alpha * value + (1.0 - alpha) * state
+                } else {
+                    value
+                };
+                *cell = state;
+            } else {
+                state = f64::NAN;
+            }
+        }
+    })
+}
+
+pub(crate) fn wma(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    ts_window(values, days, cs, |window| {
+        let mut weight = 0.9f64.powi(days.saturating_sub(1) as i32);
+        let mut weighted = 0.0;
+        let mut total = 0.0;
+        for value in window {
+            weighted += value * weight;
+            total += weight;
+            weight /= 0.9;
+        }
+        weighted / total
+    })
+}
+
+pub(crate) fn rolling_beta(y: &[f64], x: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    ts_window2(y, x, days, cs, beta_window)
+}
+
+pub(crate) fn conditional_beta(
+    y: &[f64],
+    x: &[f64],
+    cond: &[f64],
+    days: usize,
+    cs: &CellSet,
+) -> Vec<f64> {
+    if days == 0 {
+        return vec![f64::NAN; y.len()];
+    }
+    par_fill_blocks(y.len(), &cs.sym_blocks, |block, out| {
+        for (local, cell) in out.iter_mut().enumerate() {
+            if local + 1 < days {
+                continue;
+            }
+            let start = block.start + local + 1 - days;
+            let end = block.start + local + 1;
+            let mut ys = Vec::new();
+            let mut xs = Vec::new();
+            for idx in start..end {
+                if cond[idx] == 1.0 && y[idx].is_finite() && x[idx].is_finite() {
+                    ys.push(y[idx]);
+                    xs.push(x[idx]);
+                }
+            }
+            if ys.len() >= 2 {
+                *cell = beta_window(&ys, &xs);
+            }
+        }
+    })
+}
+
+pub(crate) fn multi_resi(
+    y: &[f64],
+    x1: &[f64],
+    x2: &[f64],
+    x3: &[f64],
+    days: usize,
+    cs: &CellSet,
+) -> Vec<f64> {
+    if days < 5 {
+        return vec![f64::NAN; y.len()];
+    }
+    par_fill_blocks(y.len(), &cs.sym_blocks, |block, out| {
+        for (local, cell) in out.iter_mut().enumerate() {
+            if local + 1 < days {
+                continue;
+            }
+            let start = block.start + local + 1 - days;
+            let end = block.start + local + 1;
+            if (start..end).any(|idx| {
+                !y[idx].is_finite()
+                    || !x1[idx].is_finite()
+                    || !x2[idx].is_finite()
+                    || !x3[idx].is_finite()
+            }) {
+                continue;
+            }
+            let mut normal = [[0.0; 5]; 4];
+            for idx in start..end {
+                let row = [1.0, x1[idx], x2[idx], x3[idx]];
+                for i in 0..4 {
+                    for j in 0..4 {
+                        normal[i][j] += row[i] * row[j];
+                    }
+                    normal[i][4] += row[i] * y[idx];
+                }
+            }
+            if let Some(beta) = solve_4x4(normal) {
+                let idx = end - 1;
+                *cell =
+                    y[idx] - (beta[0] + beta[1] * x1[idx] + beta[2] * x2[idx] + beta[3] * x3[idx]);
+            }
+        }
+    })
+}
+
+pub(crate) fn scan_mul(values: &[f64], cond: &[f64], cs: &CellSet) -> Vec<f64> {
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
+        let mut state = 1.0;
+        for (local, cell) in out.iter_mut().enumerate() {
+            let idx = block.start + local;
+            if cond[idx].is_nan() || values[idx].is_nan() {
+                *cell = f64::NAN;
+            } else {
+                if cond[idx] == 1.0 {
+                    state *= values[idx];
+                }
+                *cell = state;
+            }
+        }
+    })
+}
+
+fn beta_window(y: &[f64], x: &[f64]) -> f64 {
+    let x_mean = x.iter().sum::<f64>() / x.len() as f64;
+    let y_mean = y.iter().sum::<f64>() / y.len() as f64;
+    let mut covariance = 0.0;
+    let mut variance = 0.0;
+    for (y, x) in y.iter().zip(x) {
+        covariance += (x - x_mean) * (y - y_mean);
+        variance += (x - x_mean) * (x - x_mean);
+    }
+    if variance == 0.0 {
+        f64::NAN
+    } else {
+        covariance / variance
+    }
+}
+
+fn solve_4x4(mut matrix: [[f64; 5]; 4]) -> Option<[f64; 4]> {
+    for pivot in 0..4 {
+        let best = (pivot..4).max_by(|a, b| {
+            matrix[*a][pivot]
+                .abs()
+                .partial_cmp(&matrix[*b][pivot].abs())
+                .unwrap_or(Ordering::Equal)
+        })?;
+        if matrix[best][pivot].abs() <= f64::EPSILON {
+            return None;
+        }
+        matrix.swap(pivot, best);
+        let scale = matrix[pivot][pivot];
+        for value in &mut matrix[pivot][pivot..] {
+            *value /= scale;
+        }
+        let pivot_row = matrix[pivot];
+        for (row, matrix_row) in matrix.iter_mut().enumerate() {
+            if row == pivot {
+                continue;
+            }
+            let factor = matrix_row[pivot];
+            for (value, pivot_value) in matrix_row[pivot..].iter_mut().zip(&pivot_row[pivot..]) {
+                *value -= factor * pivot_value;
+            }
+        }
+    }
+    Some([matrix[0][4], matrix[1][4], matrix[2][4], matrix[3][4]])
 }
 
 /// Fill an `n_cells`-long output one block at a time, in parallel. `blocks` must
@@ -1369,6 +1587,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn gtja_recursive_and_regression_kernels_match_hand_calculations() {
+        let cs = test_cellset(vec![1.0, 2.0, 3.0, 4.0, 5.0], one_block(0..5), vec![]);
+
+        assert_vec_close(
+            &sma(&cs.fields["x"], 2, 1, &cs),
+            &[1.0, 1.5, 2.25, 3.125, 4.0625],
+        );
+        let wma_values = wma(&cs.fields["x"], 3, &cs);
+        assert!(wma_values[0].is_nan() && wma_values[1].is_nan());
+        assert_f64_eq(wma_values[2], (1.0 * 0.81 + 2.0 * 0.9 + 3.0) / 2.71);
+
+        let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = x.map(|value| 1.0 + 2.0 * value);
+        let beta = rolling_beta(&y, &x, 5, &cs);
+        assert_f64_eq(beta[4], 2.0);
+
+        assert_vec_close(
+            &scan_mul(&[2.0, 3.0, 4.0, 5.0, 6.0], &[0.0, 1.0, 0.0, 1.0, 0.0], &cs),
+            &[1.0, 3.0, 3.0, 15.0, 15.0],
+        );
+    }
+
+    #[test]
+    fn gtja_multi_residual_recovers_exact_linear_model() {
+        let cs = test_cellset(vec![0.0; 5], one_block(0..5), vec![]);
+        let x1 = [0.0, 1.0, 0.0, 0.0, 1.0];
+        let x2 = [0.0, 0.0, 1.0, 0.0, 1.0];
+        let x3 = [0.0, 0.0, 0.0, 1.0, 1.0];
+        let y = std::array::from_fn::<_, 5, _>(|idx| {
+            1.0 + 2.0 * x1[idx] + 3.0 * x2[idx] + 4.0 * x3[idx]
+        });
+        let residual = multi_resi(&y, &x1, &x2, &x3, 5, &cs);
+        assert_f64_eq(residual[4], 0.0);
     }
 
     fn assert_vec_same_numeric(actual: &[f64], expected: &[f64]) {

@@ -271,6 +271,12 @@ impl Dag {
             Expr::TsRank(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRank),
             Expr::TsRankRaw(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRankRaw),
             Expr::TsStd(inner, days) => self.lower_ts_unary(inner, *days, Node::TsStd),
+            Expr::Sma(_, _, _)
+            | Expr::Wma(_, _)
+            | Expr::RollingBeta(_, _, _)
+            | Expr::ConditionalBeta(_, _, _, _)
+            | Expr::MultiResi(_, _, _, _, _)
+            | Expr::ScanMul(_, _) => unreachable!("tree-only expression reached DAG lowering"),
             Expr::Slope(inner, days) => self.lower_ts_unary(inner, *days, Node::Slope),
             Expr::Rsquare(inner, days) => self.lower_ts_unary(inner, *days, Node::Rsquare),
             Expr::Resi(inner, days) => self.lower_ts_unary(inner, *days, Node::Resi),

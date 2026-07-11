@@ -119,8 +119,11 @@ out = qw.compute_alphas(df, "asset", "time", alphas)
 ```
 
 `qw.qlib_alpha158(input_alias, alphas=None)` 以同样签名暴露 Qlib Alpha158。
+`qw.gtja_alpha191(input_alias, alphas=None)` 暴露国泰君安 Alpha191，输出名为
+`gtja_alpha001`–`gtja_alpha191`。
 如果不需要字段映射，传入空 dict。实现口径和输入字段见
-[WorldQuant 101](worldquant_alpha101.md) 与 [Qlib Alpha158](qlib_alpha158.md)。
+[WorldQuant 101](worldquant_alpha101.md)、[Qlib Alpha158](qlib_alpha158.md) 与
+[国泰君安 Alpha191](gtja_alpha191.md)。
 
 ## 下一步
 
