@@ -187,6 +187,8 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
@@ -194,6 +196,8 @@ mod tests {
     use qweave_core::PanelOptions;
     use qweave_eval::{Binning, Demean, EvaluateOptions, Weighting, evaluate};
     use tower::ServiceExt;
+
+    static FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);
 
     fn fixture_dir() -> PathBuf {
         let mut df = df!(
@@ -210,7 +214,11 @@ mod tests {
             symbol_col: "asset".into(),
             time_col: "time".into(),
         };
-        let dir = std::env::temp_dir().join(format!("qweave-server-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "qweave-server-test-{}-{}",
+            std::process::id(),
+            FIXTURE_ID.fetch_add(1, Ordering::Relaxed),
+        ));
         let opts = EvaluateOptions {
             factor_cols: vec!["f1".into()],
             label_cols: None,
