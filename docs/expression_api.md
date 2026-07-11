@@ -20,16 +20,55 @@ intraday_return = (
 表达式传给 `compute_alphas` 或 `with_alphas` 前必须设置 alias；alias 会成为输出
 列名。
 
-常用操作包括：
+## 算子速查
 
-- 算术：`+`、`-`、`*`、`/`、一元 `-`
-- 比较：`<`、`>`、`<=`、`>=`、`==`
-- 一元变换：`abs`、`log`、`sign`、`rank`、`scale`
-- 时序窗口：`delay`、`delta`、`ts_sum`、`ts_mean`、`product`、`ts_min`、
-  `ts_max`、`ts_argmin`、`ts_argmax`、`ts_rank`、`ts_rank_raw`、`ts_std`、
-  `slope`、`rsquare`、`resi`、`quantile`、`decay_linear`
-- 二元/多元函数：`min`、`max`、`power`、`signed_power`、`correlation`、
-  `covariance`、`group_rank`、`group_neutralize`、`where_`
+通用口径：
+
+- **时序算子**按 symbol 独立计算，窗口为最近 `d` 个 bar。窗口未满或窗口内含
+  NaN 时输出 NaN，因此每个 symbol 的前 `d - 1` 行为 NaN。
+- **截面算子**在每个时间点的全截面上计算，NaN 样本不参与且保持 NaN。
+- **比较算子**输出 1.0 / 0.0；任一操作数为 NaN 时输出 NaN。
+
+### 逐元素
+
+| 算子 | 含义 |
+| --- | --- |
+| `+` `-` `*` `/`、一元 `-` | 算术运算 |
+| `<` `>` `<=` `>=` `==` | 比较，成立为 1.0，否则 0.0 |
+| `abs()` | 绝对值 |
+| `log()` | 自然对数 |
+| `sign()` | 符号函数（-1 / 0 / 1） |
+| `min(x, y)` / `max(x, y)` | 逐元素最小 / 最大 |
+| `power(x, y)` | `x^y` |
+| `signed_power(x, y)` | `sign(x) * abs(x)^y` |
+| `where_(cond, a, b)` | `cond` 成立取 `a`，否则取 `b` |
+
+### 时序窗口（逐 symbol，窗口 `d`）
+
+| 算子 | 含义 |
+| --- | --- |
+| `delay(d)` | `d` 个 bar 前的值 |
+| `delta(d)` | `x - delay(x, d)` |
+| `ts_sum(d)` / `ts_mean(d)` / `product(d)` | 窗口和 / 均值 / 乘积 |
+| `ts_min(d)` / `ts_max(d)` | 窗口最小 / 最大 |
+| `ts_argmin(d)` / `ts_argmax(d)` | 极值在窗口内的 0-based 位置（0 = 最旧，`d-1` = 当前；平手取最早） |
+| `ts_rank(d)` | 当前值在窗口内的百分位 rank，取值 `(0, 1]`，ties 取平均（pandas `rank(pct=True)` 口径） |
+| `ts_rank_raw(d)` | 当前值的 0-based 升序位置，ties 取最小（DolphinDB `mrank` 口径） |
+| `ts_std(d)` | 样本标准差（`ddof = 1`） |
+| `slope(d)` / `rsquare(d)` / `resi(d)` | 窗口值对时间索引的 OLS 斜率 / R² / 最后一点残差 |
+| `quantile(d, q)` | 窗口分位数，`q ∈ [0, 1]`，线性插值 |
+| `decay_linear(d)` | 线性加权平均，权重 `1..d`，越新的 bar 权重越大 |
+| `correlation(x, y, d)` | 窗口 Pearson 相关；任一侧零方差时为 NaN |
+| `covariance(x, y, d)` | 窗口样本协方差（`ddof = 1`） |
+
+### 截面（逐时间点）
+
+| 算子 | 含义 |
+| --- | --- |
+| `rank()` | 当日截面百分位 rank，取值 `(0, 1]`，ties 取平均 |
+| `scale(scale_to=1.0)` | 缩放使当日截面 `sum(abs(x)) = scale_to`；全零截面输出 NaN |
+| `group_rank(x, g)` | 在（日期, 分组）内的百分位 rank |
+| `group_neutralize(x, g)` | 减去（日期, 分组）内的均值 |
 
 ## 执行表达式
 
@@ -82,3 +121,9 @@ out = qf.compute_alphas(df, "asset", "time", alphas)
 `qf.qlib_alpha158(input_alias, alphas=None)` 以同样签名暴露 Qlib Alpha158。
 如果不需要字段映射，传入空 dict。实现口径和输入字段见
 [WorldQuant 101](worldquant_alpha101.md) 与 [Qlib Alpha158](qlib_alpha158.md)。
+
+## 下一步
+
+因子算完后，用[因子评估](factor_evaluation.md)的 `with_labels` 构造无前视
+forward-return 标签，再用 `evaluate` 产出 IC/分位/换手诊断，并通过
+`result.view()` 打开交互式报告。

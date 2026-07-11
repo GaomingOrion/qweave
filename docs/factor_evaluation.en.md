@@ -2,11 +2,6 @@
 
 [Chinese](factor_evaluation.md)
 
-**Status: experimental.** The evaluation API (`with_labels`, `evaluate`,
-`factor_correlation`) is new and is not yet covered by a frozen golden fixture
-the way the alpha engine is. Calibers are validated against an independent NumPy
-reference and alphalens-reloaded, but the surface may still change before 1.0.
-
 The evaluator answers: **does this factor carry information about forward
 returns?** It focuses on predictive power (IC / RankIC), monotonicity (quantile
 returns), and tradability (turnover, long-short diagnostics). It is not a
@@ -185,14 +180,15 @@ and returned as `polars.LazyFrame` scans. Small tables stay in memory. For
 thousand-factor runs, `factor_source=<parquet>` can read factor columns from
 disk in batches instead of holding a wide input frame in memory.
 
-## Reports
-
-`result.to_html(path, max_detail_factors=200)` writes a self-contained HTML
-report with a summary table and per-factor drill-down.
+## Interactive report
 
 `result.view()` starts the embedded `qweave-server` and opens a Vue + ECharts
-interactive report. It is best used on a filtered shortlist, not a thousand
-factor full run.
+interactive report (summary table + per-factor Returns/IC tearsheets) in the
+browser, with no external files required. It is best used on a filtered
+shortlist, not a thousand-factor full run.
+
+`result.to_html(path, max_detail_factors=200)` writes a single-file HTML
+report.
 
 For streamed output:
 

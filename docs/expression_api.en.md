@@ -20,16 +20,57 @@ intraday_return = (
 Expressions must be aliased before they are passed to `compute_alphas` or
 `with_alphas`; the alias becomes the output column name.
 
-Common operations include:
+## Operator Quick Reference
 
-- arithmetic: `+`, `-`, `*`, `/`, unary `-`
-- comparisons: `<`, `>`, `<=`, `>=`, `==`
-- unary transforms: `abs`, `log`, `sign`, `rank`, `scale`
-- time-series windows: `delay`, `delta`, `ts_sum`, `ts_mean`, `product`,
-  `ts_min`, `ts_max`, `ts_argmin`, `ts_argmax`, `ts_rank`, `ts_rank_raw`,
-  `ts_std`, `slope`, `rsquare`, `resi`, `quantile`, `decay_linear`
-- binary functions: `min`, `max`, `power`, `signed_power`, `correlation`,
-  `covariance`, `group_rank`, `group_neutralize`, `where_`
+Shared calibers:
+
+- **Time-series operators** run per symbol over the most recent `d` bars. The
+  output is NaN while the window is incomplete or contains any NaN, so the
+  first `d - 1` rows of each symbol are NaN.
+- **Cross-sectional operators** run over the full cross-section of each
+  timestamp; NaN samples do not participate and stay NaN.
+- **Comparisons** output 1.0 / 0.0, and NaN when either operand is NaN.
+
+### Elementwise
+
+| Operator | Meaning |
+| --- | --- |
+| `+` `-` `*` `/`, unary `-` | arithmetic |
+| `<` `>` `<=` `>=` `==` | comparison: 1.0 if true, else 0.0 |
+| `abs()` | absolute value |
+| `log()` | natural logarithm |
+| `sign()` | sign function (-1 / 0 / 1) |
+| `min(x, y)` / `max(x, y)` | elementwise min / max |
+| `power(x, y)` | `x^y` |
+| `signed_power(x, y)` | `sign(x) * abs(x)^y` |
+| `where_(cond, a, b)` | `a` where `cond` holds, else `b` |
+
+### Time-Series Windows (per symbol, window `d`)
+
+| Operator | Meaning |
+| --- | --- |
+| `delay(d)` | value `d` bars ago |
+| `delta(d)` | `x - delay(x, d)` |
+| `ts_sum(d)` / `ts_mean(d)` / `product(d)` | window sum / mean / product |
+| `ts_min(d)` / `ts_max(d)` | window min / max |
+| `ts_argmin(d)` / `ts_argmax(d)` | 0-based position of the extremum (0 = oldest, `d-1` = current; earliest wins ties) |
+| `ts_rank(d)` | percentile rank of the current value within the window, in `(0, 1]`, ties averaged (pandas `rank(pct=True)` caliber) |
+| `ts_rank_raw(d)` | 0-based ascending position of the current value, minimum on ties (DolphinDB `mrank` caliber) |
+| `ts_std(d)` | sample standard deviation (`ddof = 1`) |
+| `slope(d)` / `rsquare(d)` / `resi(d)` | OLS of window values against the time index: slope / R² / last-point residual |
+| `quantile(d, q)` | window quantile, `q ∈ [0, 1]`, linear interpolation |
+| `decay_linear(d)` | linearly weighted mean with weights `1..d`, newer bars weighted more |
+| `correlation(x, y, d)` | window Pearson correlation; NaN when either side has zero variance |
+| `covariance(x, y, d)` | window sample covariance (`ddof = 1`) |
+
+### Cross-Sectional (per timestamp)
+
+| Operator | Meaning |
+| --- | --- |
+| `rank()` | cross-sectional percentile rank, in `(0, 1]`, ties averaged |
+| `scale(scale_to=1.0)` | rescale so the day's `sum(abs(x)) = scale_to`; all-zero cross-sections yield NaN |
+| `group_rank(x, g)` | percentile rank within each (date, group) |
+| `group_neutralize(x, g)` | subtract the (date, group) mean |
 
 ## Execute Expressions
 
@@ -46,15 +87,10 @@ Use `compute_alphas` when you want a tidy full-history `(time, symbol)` panel:
 out = qf.compute_alphas(df, "asset", "time", [intraday_return])
 ```
 
-`compute_alphas(..., output_path="alphas.parquet")` writes the full frame to
-Parquet and returns a summary dict. The current 0.3 implementation still
-materializes the full frame before writing; streaming/batched output is reserved
-for a later release.
-
-`with_alphas` preserves original row order by allocating one full-size output
-buffer per expression and scattering evaluated `(time, symbol)` values back into
-input order before appending the columns. For large batches, prefer
-`compute_alphas` when you do not need to keep the original DataFrame shape.
+`compute_alphas(..., output_path="alphas.parquet")` writes the full result and
+returns a summary. `with_alphas` allocates one full-size output buffer per
+expression and scatters values back into input row order; for large factor
+batches where the original shape is not needed, prefer `compute_alphas`.
 
 As a rule of thumb:
 
@@ -92,6 +128,13 @@ out = qf.compute_alphas(df, "asset", "time", alphas)
 
 `qf.qlib_alpha158(input_alias, alphas=None)` exposes the Qlib Alpha158 set with
 the same signature. Pass an empty dict for identity input mapping. See
-[worldquant_alpha101.md](worldquant_alpha101.md) and
-[qlib_alpha158.md](qlib_alpha158.md) for implementation defaults and required
+[WorldQuant 101](worldquant_alpha101.en.md) and
+[Qlib Alpha158](qlib_alpha158.en.md) for implementation defaults and required
 input fields.
+
+## Next Steps
+
+Once factors are computed, use [Factor Evaluation](factor_evaluation.en.md):
+`with_labels` builds leakage-safe forward-return labels, `evaluate` produces
+IC/quantile/turnover diagnostics, and `result.view()` opens the interactive
+report.

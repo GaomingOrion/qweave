@@ -10,7 +10,6 @@ import qweave as qf
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 DATA_PATH = EXAMPLE_DIR / "data" / "sample_daily.parquet"
-REPORT_PATH = EXAMPLE_DIR / "output" / "qweave-report.html"
 FACTOR_NAMES = ["alpha13", "alpha101", "mean_reversion_20"]
 
 
@@ -48,8 +47,6 @@ def evaluate_sample(data_path: Path = DATA_PATH):
 
 def main() -> None:
     result = evaluate_sample()
-    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    result.to_html(str(REPORT_PATH))
     print(
         result.summary.select(
             "factor",
@@ -59,7 +56,8 @@ def main() -> None:
             "spread_mean",
         )
     )
-    print(f"\nreport: {REPORT_PATH}")
+    print("\nopening interactive report (Ctrl-C to stop) ...")
+    result.view()
 
 
 if __name__ == "__main__":

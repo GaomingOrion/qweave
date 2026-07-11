@@ -6,6 +6,28 @@ qweave is a **lightweight Rust/Polars kernel for factor research**. It does not
 try to own data platforms, model training, portfolio optimization, and live
 execution all at once. Instead, it focuses on the part that often gets slow and
 messy: factor expressions, batch computation, labels, evaluation, and reports.
+On the same 4.8M-row synthetic panel, qweave is 23.85× faster than Qlib
+Alpha158DL and 2.56× faster end to end than KunQuant's JIT C++ path
+([measured data and calibers](benchmark.en.md)).
+
+## Where qweave Helps
+
+**Less glue code.** Researchers can append alphas, labels, and evaluation outputs
+to the same DataFrame instead of manually maintaining multiple wide tables, long
+tables, and index joins.
+
+**Batch factors feel natural.** Built-in factor libraries return normal
+expression objects, so you can select subsets, remap inputs, add custom
+expressions, and submit everything to the evaluator together.
+
+**Performance work lives in the library.** Users write Python expressions, while
+execution enters a Rust DAG with common-subexpression reuse, slot reuse,
+node-level parallelism, and fused elementwise chains.
+
+**Evaluation calibers are explicit.** `with_labels` uses a panel-wide date grid,
+so missing symbol-days do not silently compress holding periods. `evaluate`
+separates factor-valid samples, pair-valid samples, tradability filters, and
+minimum cross-section counts.
 
 ## One-Line Differences
 
@@ -29,33 +51,18 @@ messy: factor expressions, batch computation, labels, evaluation, and reports.
 | Best fit | Existing DataFrame/Parquet data where you want fast factor computation and evaluation | Full research platform with model and experiment management | Compiling expression bundles into high-performance execution paths |
 | Current boundary | pre-1.0; modeling/strategy/backtesting are planned | Broader platform, with higher adoption surface | Strong JIT/compiler path, but requires workflow assembly |
 
-## Where qweave Helps
-
-**Less glue code.** Researchers can append alphas, labels, and evaluation outputs
-to the same DataFrame instead of manually maintaining multiple wide tables, long
-tables, and index joins.
-
-**Batch factors feel natural.** Built-in factor libraries return normal
-expression objects, so you can select subsets, remap inputs, add custom
-expressions, and submit everything to the evaluator together.
-
-**Performance work lives in the library.** Users write Python expressions, while
-execution enters a Rust DAG with common-subexpression reuse, slot reuse,
-node-level parallelism, and fused elementwise chains.
-
-**Evaluation calibers are explicit.** `with_labels` uses a panel-wide date grid,
-so missing symbol-days do not silently compress holding periods. `evaluate`
-separates factor-valid samples, pair-valid samples, tradability filters, and
-minimum cross-section counts.
+Beyond these qualitative boundaries, [Benchmarks](benchmark.en.md) publishes
+measured head-to-head numbers against Qlib Alpha158DL and KunQuant on the same
+synthetic panel, with machine specs, commit, and full commands.
 
 ## Where It Is Not The Best Fit
 
-- If you need ready-made data ingestion, model templates, portfolio optimization,
-  and experiment-managed backtests, Qlib currently covers more of that surface.
-- If your main goal is compiling a fixed expression bundle into highly optimized
-  C++ code, KunQuant is the more direct tool.
-- If you only need a small one-off notebook analysis, pandas/Alphalens-style
-  tools may be lighter.
+- Ready-made data ingestion, model templates, portfolio optimization, and
+  experiment-managed backtests: choose Qlib.
+- Compiling a fixed expression bundle into maximally optimized C++ code:
+  choose KunQuant.
+- A small one-off notebook analysis: pandas/Alphalens-style tools may be
+  lighter.
 
 qweave fits the space where you already have your own data and research process,
 but want the factor computation and evaluation layer to be faster, more unified,

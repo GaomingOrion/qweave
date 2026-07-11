@@ -72,8 +72,6 @@ Valid values are `dag` and `tree`.
 
 ## Current Boundaries
 
-- qweave is not a full backtester yet; it does not simulate matching, slippage,
-  capital curves, or portfolio constraints.
-- The evaluation API is still marked experimental and may change before 1.0.
-- The benchmark documentation provides reproducible methods; the repository does
-  not keep performance numbers from the pre-Windows environment.
+qweave focuses on the factor computation and evaluation layer: it does not
+simulate matching, slippage, capital curves, or portfolio constraints. The API
+is pre-1.0, so field names or statistical outputs may still change before 1.0.

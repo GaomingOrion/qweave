@@ -6,21 +6,26 @@
 assets, 320 trading days, and OHLCV, industry, and tradability fields. It does
 not contain real market data.
 
-Complete the source installation on the repository home page, then run:
+Install qweave first (or build from source as described on the repository
+home page):
 
 ```powershell
-uv run python examples\quickstart.py
+python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.4.1/qweave-0.4.1-cp310-abi3-win_amd64.whl
+```
+
+Then run:
+
+```powershell
+python examples\quickstart.py
 ```
 
 The script computes two WorldQuant factors and one custom expression, creates
 1/5/20-day forward-return labels, runs IC, quantile-return, turnover, and
-long-short diagnostics, and writes `examples\output\qweave-report.html`.
+long-short diagnostics, prints the summary table, and opens the interactive
+evaluation report in your browser via `result.view()` (Ctrl-C to stop).
 
 To regenerate the sample panel:
 
 ```powershell
-uv run python examples\generate_sample_data.py
+python examples\generate_sample_data.py
 ```
-
-The sample output verifies the research workflow. It is not evidence of real
-market performance or investment advice.

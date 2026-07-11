@@ -2,9 +2,15 @@
 
 [中文](index.md)
 
+qweave is a Polars-native, Rust-accelerated factor research engine: batch
+factor computation, leakage-safe labels, IC/quantile/turnover evaluation, and
+an interactive report in one DataFrame pipeline. All 158 Qlib Alpha158 factors
+run in about 2.2 s on a 4.8M-row panel ([measured data](benchmark.en.md)).
+
 The documentation follows the order of a real factor-research workflow. New
-users should start with the repository [quickstart](../README.en.md#from-market-data-to-a-factor-report)
-and the runnable [example](../examples/README.en.md).
+users should start with the repository
+[quickstart](../README.en.md#from-market-data-to-a-factor-report) and the
+runnable [example](../examples/README.en.md).
 
 ## Learning Path
 
@@ -14,13 +20,15 @@ and the runnable [example](../examples/README.en.md).
    and [Qlib Alpha158](qlib_alpha158.en.md).
 4. **Create labels and evaluate factors:** [Factor Evaluation](factor_evaluation.en.md).
 5. **Understand execution:** [Architecture and Design Tradeoffs](architecture.en.md).
-6. **Run large workloads:** [Performance and Benchmarks](benchmark.en.md).
+6. **Run large workloads:** [Benchmarks](benchmark.en.md).
 
-## Before Choosing qweave
+## Positioning and Comparison
 
-- [Comparison](comparison.en.md) explains the boundary between qweave, Qlib,
-  KunQuant, and pandas/Alphalens-style tools.
-- qweave focuses on factor computation and diagnostics. It does not provide
-  market data, order matching, slippage models, or full strategy backtesting.
-- Maintainers and contributors should read the [Development Guide](development.en.md)
-  and [CONTRIBUTING](../CONTRIBUTING.en.md).
+- [Comparison](comparison.en.md) explains where qweave, Qlib, KunQuant, and
+  pandas/Alphalens-style tools each fit, with measured head-to-head numbers on
+  the same panel.
+- qweave focuses on the factor computation and diagnostics layer. It runs
+  standalone or embeds into a larger research platform.
+- Maintainers and contributors should read the
+  [Development Guide](development.en.md) and
+  [CONTRIBUTING](../CONTRIBUTING.en.md).
