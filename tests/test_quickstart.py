@@ -1,4 +1,10 @@
-from examples.quickstart import FACTOR_NAMES, evaluate_sample
+from pathlib import Path
+from runpy import run_path
+
+
+_quickstart = run_path(Path(__file__).parents[1] / "examples" / "quickstart.py")
+FACTOR_NAMES = _quickstart["FACTOR_NAMES"]
+evaluate_sample = _quickstart["evaluate_sample"]
 
 
 def test_bundled_quickstart_runs_end_to_end():
