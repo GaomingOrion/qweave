@@ -171,6 +171,13 @@ fn warn_missing_days(py: Python<'_>, missing_days: &[String]) -> PyResult<()> {
     PyErr::warn(py, &category, &std::ffi::CString::new(message)?, 2)
 }
 
+/// Build WorldQuant 101 alpha expressions.
+///
+/// `input_alias` maps canonical fields to DataFrame columns. Passing an empty
+/// dict keeps the canonical names; it does not select similarly named columns
+/// such as `close_adj`. Full-set `input_fields`: `cap`, `close`, `high`,
+/// `industry`, `low`, `open`, `sector`, `subindustry`, `volume`, `vwap`.
+/// Use `worldquant_alpha101_input_fields()` to retrieve this list.
 #[pyfunction(name = "worldquant_alpha101", signature = (input_alias, alphas = None))]
 fn worldquant_alpha101_py(
     input_alias: HashMap<String, String>,
@@ -179,6 +186,13 @@ fn worldquant_alpha101_py(
     alpha_builder_py(qweave_factors::worldquant_alpha101(), input_alias, alphas)
 }
 
+/// Build Qlib Alpha158 expressions.
+///
+/// `input_alias` maps canonical fields to DataFrame columns. Passing an empty
+/// dict keeps the canonical names; it does not select similarly named columns
+/// such as `close_adj`. Full-set `input_fields`: `close`, `high`, `low`,
+/// `open`, `volume`, `vwap`. Use `qlib_alpha158_input_fields()` to retrieve
+/// this list.
 #[pyfunction(name = "qlib_alpha158", signature = (input_alias, alphas = None))]
 fn qlib_alpha158_py(
     input_alias: HashMap<String, String>,
@@ -187,12 +201,57 @@ fn qlib_alpha158_py(
     alpha_builder_py(qweave_factors::qlib_alpha158(), input_alias, alphas)
 }
 
+/// Build Guotai Junan Alpha191 expressions.
+///
+/// `input_alias` maps canonical fields to DataFrame columns. Passing an empty
+/// dict keeps the canonical names; it does not select similarly named columns
+/// such as `close_adj`. Full-set `input_fields`: `close`, `high`, `hml`,
+/// `index_close`, `index_open`, `low`, `mkt`, `open`, `smb`, `volume`, `vwap`.
+/// Use `gtja_alpha191_input_fields()` to retrieve this list.
 #[pyfunction(name = "gtja_alpha191", signature = (input_alias, alphas = None))]
 fn gtja_alpha191_py(
     input_alias: HashMap<String, String>,
     alphas: Option<Vec<String>>,
 ) -> PyResult<Vec<PyExpr>> {
     alpha_builder_py(qweave_factors::gtja_alpha191(), input_alias, alphas)
+}
+
+/// Return the canonical fields used by the full WorldQuant 101 set.
+///
+/// The returned names are the `input_alias` keys. Print this result to see the
+/// complete default input contract before mapping fields such as `close` to
+/// `close_adj`.
+#[pyfunction(name = "worldquant_alpha101_input_fields")]
+fn worldquant_alpha101_input_fields_py() -> Vec<String> {
+    alpha_input_fields(qweave_factors::worldquant_alpha101())
+}
+
+/// Return the canonical fields used by the full Qlib Alpha158 set.
+///
+/// The returned names are the `input_alias` keys. Print this result to see the
+/// complete default input contract before mapping fields such as `close` to
+/// `close_adj`.
+#[pyfunction(name = "qlib_alpha158_input_fields")]
+fn qlib_alpha158_input_fields_py() -> Vec<String> {
+    alpha_input_fields(qweave_factors::qlib_alpha158())
+}
+
+/// Return the canonical fields used by the full Guotai Junan Alpha191 set.
+///
+/// The returned names are the `input_alias` keys. Print this result to see the
+/// complete default input contract before mapping fields such as `close` to
+/// `close_adj`.
+#[pyfunction(name = "gtja_alpha191_input_fields")]
+fn gtja_alpha191_input_fields_py() -> Vec<String> {
+    alpha_input_fields(qweave_factors::gtja_alpha191())
+}
+
+fn alpha_input_fields(alphas: Vec<(String, Expr)>) -> Vec<String> {
+    let mut fields = std::collections::BTreeSet::new();
+    for (_, expr) in alphas {
+        qweave_core::expr::collect_fields(&expr, &mut fields);
+    }
+    fields.into_iter().collect()
 }
 
 fn alpha_builder_py(
@@ -264,6 +323,12 @@ fn qweave(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(worldquant_alpha101_py, module)?)?;
     module.add_function(wrap_pyfunction!(qlib_alpha158_py, module)?)?;
     module.add_function(wrap_pyfunction!(gtja_alpha191_py, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        worldquant_alpha101_input_fields_py,
+        module
+    )?)?;
+    module.add_function(wrap_pyfunction!(qlib_alpha158_input_fields_py, module)?)?;
+    module.add_function(wrap_pyfunction!(gtja_alpha191_input_fields_py, module)?)?;
     Ok(())
 }
 

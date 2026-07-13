@@ -70,6 +70,51 @@ def test_worldquant_alpha101_returns_expression_subset_with_aliases():
     ][0].collect_inputs()
 
 
+def test_builtin_alpha_input_fields_and_docstrings():
+    assert qweave.worldquant_alpha101_input_fields() == [
+        "cap",
+        "close",
+        "high",
+        "industry",
+        "low",
+        "open",
+        "sector",
+        "subindustry",
+        "volume",
+        "vwap",
+    ]
+    assert qweave.qlib_alpha158_input_fields() == [
+        "close",
+        "high",
+        "low",
+        "open",
+        "volume",
+        "vwap",
+    ]
+    assert qweave.gtja_alpha191_input_fields() == [
+        "close",
+        "high",
+        "hml",
+        "index_close",
+        "index_open",
+        "low",
+        "mkt",
+        "open",
+        "smb",
+        "volume",
+        "vwap",
+    ]
+
+    for builder in [
+        qweave.worldquant_alpha101,
+        qweave.qlib_alpha158,
+        qweave.gtja_alpha191,
+    ]:
+        assert "input_alias" in builder.__doc__
+        assert "input_fields" in builder.__doc__
+        assert "close_adj" in builder.__doc__
+
+
 def test_worldquant_alpha101_rejects_non_worldquant_names():
     with pytest.raises(ValueError, match="factor `group_returns_rank` is not known"):
         qweave.worldquant_alpha101({}, alphas=["group_returns_rank"])
