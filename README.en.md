@@ -18,8 +18,8 @@ pipeline.
   same factor set, and 32 threads for every engine; 2.56× faster end to end
   than KunQuant's JIT C++ path, with no C++ toolchain required. Commands and
   full data in [Benchmarks](docs/benchmark.en.md).
-- 🧩 **259 built-in classic factors:** WorldQuant Alpha101 + Qlib Alpha158,
-  with time-series and cross-sectional operators in one expression API —
+- 🧩 **450 built-in classic factors:** WorldQuant Alpha101 + Qlib Alpha158 +
+  Guotai Junan Alpha191, with time-series and cross-sectional operators in one expression API —
   select, remap inputs, mix, and execute them as one batch.
 - 📊 **Interactive report in one line:** `result.view()` opens the embedded
   Vue + ECharts interface with per-factor quantile returns, monthly IC, and
@@ -43,15 +43,15 @@ Install directly from
 
 ```powershell
 # Windows x64
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-win_amd64.whl
+python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-win_amd64.whl
 ```
 
 ```bash
 # Linux x86_64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
 
 # macOS arm64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-macosx_11_0_arm64.whl
+pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-macosx_11_0_arm64.whl
 ```
 
 Wheels for other platforms (Linux aarch64, macOS x86_64) are on the
@@ -123,9 +123,9 @@ python examples\quickstart.py
 - **Execute the whole factor batch once:** expressions enter one Rust DAG with
   common-subexpression reuse, intermediate-slot reuse, fused elementwise
   chains, and node-level parallelism.
-- **259 composable classic factors:** WorldQuant Alpha101 and Qlib Alpha158 use
-  the same API as custom expressions, so they can be selected, remapped, mixed,
-  and executed together.
+- **450 composable classic factors:** WorldQuant Alpha101, Qlib Alpha158, and
+  Guotai Junan Alpha191 use the same API as custom expressions, so they can be
+  selected, remapped, mixed, and executed together.
 - **Reports included:** `result.view()` opens the Vue + ECharts interactive
   interface with per-factor drill-down. Thousand-factor workloads can stream
   results to Parquet.

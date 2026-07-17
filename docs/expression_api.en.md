@@ -134,6 +134,10 @@ Pass an empty dict for identity input mapping. See
 [Qlib Alpha158](qlib_alpha158.en.md), plus
 [Guotai Junan Alpha191](gtja_alpha191.en.md), for implementation defaults and
 required input fields.
+All three builders print the canonical-input-to-DataFrame mapping used by the
+requested factors; unmapped fields appear as identity mappings. When a panel
+contains both `close` and `close_adj`, this makes it possible to confirm that
+`{"close": "close_adj"}` was supplied before computing factors.
 
 ## Next Steps
 

@@ -27,6 +27,8 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 - 传入 `alphas` 时按请求顺序返回指定子集。
 - `input_alias` 把标准字段名（如 `close`）映射到实际列名（如 `adj_close`）。
   不需要映射时传入空 dict。
+- 每次构造都会打印所选因子实际使用的标准字段到 DataFrame 列名映射；未映射字段
+  显式显示为自身，便于确认 `close` 是否已映射到 `close_adj`。
 
 `compute_alphas()` 在完整面板上执行表达式，返回按 `(symbol, time)` 排序的结果；
 `with_alphas()` 按原始行序把表达式输出追加回输入 DataFrame。自定义表达式见

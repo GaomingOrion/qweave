@@ -171,14 +171,14 @@ def test_compute_alphas_alpha101_matches_python_baseline():
     assert out.columns == ["time", "asset", "alpha101"]
     assert out.select(["time", "asset"]).rows() == [
         (1, "A"),
-        (1, "B"),
         (2, "A"),
+        (1, "B"),
         (2, "B"),
     ]
     expected = [
         _alpha101_baseline(df, 1, "A"),
-        _alpha101_baseline(df, 1, "B"),
         _alpha101_baseline(df, 2, "A"),
+        _alpha101_baseline(df, 1, "B"),
         _alpha101_baseline(df, 2, "B"),
     ]
     for actual, expected_value in zip(out.get_column("alpha101").to_list(), expected):

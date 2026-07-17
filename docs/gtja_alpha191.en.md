@@ -16,6 +16,9 @@ out = qweave.compute_alphas(df, "asset", "time", alphas)
 
 Omitting `alphas` returns all 191 expressions. A requested subset preserves its
 input order. `input_alias` maps canonical inputs to physical DataFrame columns.
+Each build prints the canonical-input-to-DataFrame mapping used by the requested
+factors. Unmapped fields appear as identity mappings, making it clear whether
+`close` was mapped to `close_adj`.
 
 ## Inputs and calibers
 

@@ -54,7 +54,8 @@ Remove-Item Env:\QWEAVE_ENGINE
 ## Workspace 结构
 
 - `qweave-core`：面板布局、列校验、alpha 表达式求值和结果 sink。
-- `qweave-factors`：内置 alpha builder，包括 WorldQuant 101 和 Qlib Alpha158。
+- `qweave-factors`：内置 alpha builder，包括 WorldQuant 101、Qlib Alpha158 和
+  国泰君安 Alpha191。
 - `qweave-eval`：forward-return 标签、因子评估、相关性、报告表和 HTML 输出。
 - `qweave-server`：交互式评估报告的 Axum 服务。
 - `qweave-py`：PyO3 扩展模块，对 Python 暴露为 `qweave`。

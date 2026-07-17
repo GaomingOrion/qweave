@@ -124,6 +124,9 @@ out = qw.compute_alphas(df, "asset", "time", alphas)
 如果不需要字段映射，传入空 dict。实现口径和输入字段见
 [WorldQuant 101](worldquant_alpha101.md)、[Qlib Alpha158](qlib_alpha158.md) 与
 [国泰君安 Alpha191](gtja_alpha191.md)。
+三个内置 builder 会打印本次所选因子实际使用的标准字段到 DataFrame 列名映射；未映射
+字段显示为自身。因此同时拥有 `close` 和 `close_adj` 时，可以在计算前确认是否显式
+传入了 `{"close": "close_adj"}`。
 
 ## 下一步
 

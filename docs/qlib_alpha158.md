@@ -56,6 +56,8 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 `qlib_alpha158(input_alias, alphas=None)` 返回 `PyExpr` 对象。省略 `alphas`
 时返回全部 158 个因子；传入 `alphas` 时按请求顺序返回指定子集。
 `input_alias` 将标准输入字段映射到实际 DataFrame 列；不需要映射时传空 dict。
+每次构造都会打印所选因子实际使用的标准字段到 DataFrame 列名映射；未映射字段显式
+显示为自身，便于确认 `close` 是否已映射到 `close_adj`。
 
 ## 输入字段
 

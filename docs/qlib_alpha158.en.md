@@ -60,6 +60,9 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 `alphas` returns all 158 factors; passing `alphas` returns the named subset in
 request order. `input_alias` maps canonical input names to physical DataFrame
 columns; pass an empty dict for identity mapping.
+Each build prints the canonical-input-to-DataFrame mapping used by the requested
+factors. Unmapped fields appear as identity mappings, making it clear whether
+`close` was mapped to `close_adj`.
 
 ## Input Fields
 

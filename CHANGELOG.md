@@ -5,7 +5,7 @@ All notable changes will be documented in this file.
 The project follows pre-1.0 semantic versioning: minor versions may change APIs,
 and patch versions should remain backward compatible within a minor line.
 
-## Unreleased
+## v0.6.0 - 2026-07-17
 
 - **Breaking:** `compute_alphas` now returns rows sorted by `(symbol, time)`
   instead of `(time, symbol)`, matching the common instrument-major panel
@@ -15,6 +15,10 @@ and patch versions should remain backward compatible within a minor line.
   Qlib158 over ~15M rows) without giving up parallelism.
 - Added the built-in `gtja_alpha191()` collection with padded output names
   `gtja_alpha001` through `gtja_alpha191`.
+- Corrected the Alpha191 `MAX(x, 0)` and DBM formula transcriptions.
+- Built-in factor builders now print the resolved canonical-input-to-DataFrame
+  mapping for the requested factors, making aliases such as
+  `close -> close_adj` visible at construction time.
 
 ## v0.5.0 - 2026-07-11
 

@@ -1,6 +1,6 @@
 [package]
 name = "qweave-server"
-version = "0.5.0"
+version = "0.6.0"
 description = "Interactive factor-evaluation report server for qweave"
 authors.workspace = true
 edition.workspace = true

@@ -15,6 +15,8 @@ out = qweave.compute_alphas(df, "asset", "time", alphas)
 
 省略 `alphas` 时返回全部 191 个表达式；指定名称时保持请求顺序。`input_alias`
 将标准输入名映射到 DataFrame 实际列名。
+每次构造都会打印所选因子实际使用的标准字段到 DataFrame 列名映射；未映射字段显式
+显示为自身，便于确认 `close` 是否已映射到 `close_adj`。
 
 ## 输入与口径
 

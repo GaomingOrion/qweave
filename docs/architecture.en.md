@@ -63,8 +63,8 @@ Valid values are `dag` and `tree`.
 
 - `qweave-core`: panel layout, column validation, alpha expression evaluation,
   and result sinks.
-- `qweave-factors`: built-in alpha builders for WorldQuant 101 and Qlib
-  Alpha158.
+- `qweave-factors`: built-in alpha builders for WorldQuant 101, Qlib Alpha158,
+  and Guotai Junan Alpha191.
 - `qweave-eval`: forward-return labels, factor evaluation, correlation, report
   tables, and HTML output.
 - `qweave-server`: Axum server for the interactive evaluation report.

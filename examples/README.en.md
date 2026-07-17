@@ -10,7 +10,7 @@ Install qweave first (or build from source as described on the repository
 home page):
 
 ```powershell
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-win_amd64.whl
+python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-win_amd64.whl
 ```
 
 Then run:

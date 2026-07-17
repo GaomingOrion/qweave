@@ -27,6 +27,9 @@ qweave.compute_alphas(df, "asset", "time", alphas)
 - Passing `alphas` returns the named subset in request order.
 - `input_alias` maps canonical input names such as `close` to physical DataFrame
   columns such as `adj_close`; pass an empty dict for identity mapping.
+- Each build prints the canonical-input-to-DataFrame mapping used by the
+  requested factors. Unmapped fields appear as identity mappings, making it
+  clear whether `close` was mapped to `close_adj`.
 
 `compute_alphas()` evaluates expressions over the full panel and returns rows
 sorted by `(symbol, time)`. `with_alphas()` appends outputs to the input

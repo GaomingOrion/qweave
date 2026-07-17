@@ -8,7 +8,7 @@
 先安装 qweave（也可以按仓库首页从源码构建）：
 
 ```powershell
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.5.0/qweave-0.5.0-cp310-abi3-win_amd64.whl
+python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-win_amd64.whl
 ```
 
 然后运行：

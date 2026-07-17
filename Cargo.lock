@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "qweave-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "polars",
  "rayon",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "qweave-eval"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "polars",
  "qweave-core",
@@ -2548,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "qweave-factors"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "mimalloc",
  "polars",
@@ -2558,7 +2558,7 @@ dependencies = [
 
 [[package]]
 name = "qweave-py"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "mimalloc",
  "polars",
@@ -2573,7 +2573,7 @@ dependencies = [
 
 [[package]]
 name = "qweave-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "axum",
  "clap",
