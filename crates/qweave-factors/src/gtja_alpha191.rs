@@ -856,8 +856,11 @@ fn alpha_062() -> Expr {
 
 fn alpha_063() -> Expr {
     let _close = close();
-    ((sma(max(c(0.0), (_close.clone() - delay(_close.clone(), 1))), 6, 1)
-        / sma(abs((_close.clone() - delay(_close.clone(), 1))), 6, 1))
+    ((sma(
+        max(c(0.0), (_close.clone() - delay(_close.clone(), 1))),
+        6,
+        1,
+    ) / sma(abs((_close.clone() - delay(_close.clone(), 1))), 6, 1))
         * c(100.0))
 }
 
