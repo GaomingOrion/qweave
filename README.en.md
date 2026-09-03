@@ -35,27 +35,16 @@ computations, and matrix-alignment problems. It focuses on whether factors carry
 stable information about future returns. It is not a data vendor, matching
 simulator, or full investment platform.
 
-## Installation
+## Quick Start
 
-Install directly from
-[GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest)
-(CPython 3.10+ stable ABI):
+Install from PyPI (Python 3.10+):
 
 ```powershell
-# Windows x64
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-win_amd64.whl
+pip install qweave
 ```
 
-```bash
-# Linux x86_64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-
-# macOS arm64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-macosx_11_0_arm64.whl
-```
-
-Wheels for other platforms (Linux aarch64, macOS x86_64) are on the
-[Releases page](https://github.com/GaomingOrion/qweave/releases/latest).
+Platform-specific wheels are also available from
+[GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest).
 For source builds see the [Development Guide](docs/development.en.md).
 
 ## From Market Data To A Factor Report
@@ -190,7 +179,6 @@ evaluation kernel. See [Comparison](docs/comparison.en.md) for details.
   API, high-throughput batch execution, and unified evaluation calibers
   powering the automated "generate factors → batch compute → strict evaluate"
   factor-mining loop.
-- Publish to PyPI so installation becomes a single `pip install qweave`.
 - Expand the built-in factor libraries and time-series/cross-section operators.
 - Keep improving the interactive report as the default way to inspect
   evaluation results.

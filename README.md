@@ -29,26 +29,15 @@ qweave 适合已经用 Parquet/Polars 管理数据，希望减少 Python 逐因�
 计算和多张矩阵对齐工作的量化研究者。它聚焦"因子是否携带稳定未来收益信息"的研究
 层，不是数据供应商、撮合模拟器或完整投资平台。
 
-## 安装
+## 快速开始
 
-从 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest) 直链安装
-（CPython 3.10+ stable ABI）：
+从 PyPI 安装（Python 3.10+）：
 
 ```powershell
-# Windows x64
-python -m pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-win_amd64.whl
+pip install qweave
 ```
 
-```bash
-# Linux x86_64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-
-# macOS arm64
-pip install https://github.com/GaomingOrion/qweave/releases/download/v0.6.0/qweave-0.6.0-cp310-abi3-macosx_11_0_arm64.whl
-```
-
-其他平台（Linux aarch64、macOS x86_64）的 wheel 见
-[Releases 页面](https://github.com/GaomingOrion/qweave/releases/latest)。
+如需指定平台的 wheel，见 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest)。
 从源码构建见[开发者手册](docs/development.md)。
 
 ## 从行情面板到因子报告
@@ -162,7 +151,6 @@ JIT 编译）：
 
 - **面向投研 Agent 的实验内核：** 易写的表达式 API + 高吞吐批量执行 + 统一
   评估口径，支撑「生成因子 → 批量计算 → 严格评估」的自动化因子挖掘闭环。
-- 发布到 PyPI，安装收敛为一行 `pip install qweave`。
 - 扩充内置因子库与时序/截面算子覆盖。
 - 交互式报告持续增强，作为评估结果的默认查看方式。
 
