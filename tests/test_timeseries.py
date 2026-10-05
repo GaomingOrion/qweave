@@ -96,6 +96,17 @@ def test_ema_initialization_and_restart(missing):
     np.testing.assert_allclose(compute(values, "ema", 1), expected_identity)
 
 
+def test_ema_one_preserves_finite_values_across_scale_changes():
+    values = [1e16, 1.0, 2.0, -1e16, 1.0, 100.0, 1e-15,
+              math.nan, math.inf, -math.inf, None, -0.0, 3.0]
+    expected = np.array([math.nan if x is None or not math.isfinite(x) else x
+                         for x in values])
+    actual = compute(values, "ema", 1)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(np.signbit(actual[~np.isnan(expected)]),
+                                  np.signbit(expected[~np.isnan(expected)]))
+
+
 @pytest.mark.parametrize("days", [1, 2, 7, 20])
 def test_ema_matches_independent_recurrence(days):
     values = np.random.default_rng(19).normal(size=100)

@@ -491,6 +491,13 @@ pub(crate) fn ema(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     if days == 0 {
         return vec![f64::NAN; values.len()];
     }
+    if days == 1 {
+        // Preserve the identity without cancellation in state + (value - state).
+        return values
+            .par_iter()
+            .map(|&value| if value.is_finite() { value } else { f64::NAN })
+            .collect();
+    }
     let period = days as f64;
     let alpha = 2.0 / (period + 1.0);
     par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
