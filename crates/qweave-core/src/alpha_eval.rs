@@ -430,59 +430,153 @@ pub(crate) fn gtja_wma(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 
 /// Full finite-window, bias-corrected skewness in symbol-major layout.
 pub(crate) fn ts_skew(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    if days < 3 {
-        return vec![f64::NAN; values.len()];
-    }
-    ts_window(values, days, cs, |window| {
-        standardized_moment(window, false)
-    })
+    ts_rolling_moment::<false>(values, days, cs)
 }
 
 /// Full finite-window, bias-corrected Fisher excess kurtosis in symbol-major layout.
 pub(crate) fn ts_kurt(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
-    if days < 4 {
-        return vec![f64::NAN; values.len()];
-    }
-    ts_window(values, days, cs, |window| standardized_moment(window, true))
+    ts_rolling_moment::<true>(values, days, cs)
 }
 
-// Center before scaling to retain small variations on a large offset. Scaling
-// bounds the central powers and avoids overflow/underflow in the moment ratios.
-fn standardized_moment(window: &[f64], kurtosis: bool) -> f64 {
-    let mut low = f64::INFINITY;
-    let mut high = f64::NEG_INFINITY;
-    for &value in window {
-        if !value.is_finite() {
-            return f64::NAN;
+#[derive(Default)]
+struct RollingMoments {
+    center: f64,
+    scale: f64,
+    mean: f64,
+    m2: f64,
+    m3: f64,
+    m4: f64,
+    min_m2: f64,
+    min_m4: f64,
+}
+
+impl RollingMoments {
+    // Recenter and scale a finite window before taking powers, preserving small
+    // variations on large offsets and avoiding overflow at extreme magnitudes.
+    fn rebuild<const KURTOSIS: bool>(window: &[f64]) -> Self {
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        for &x in window {
+            low = low.min(x);
+            high = high.max(x);
         }
-        low = low.min(value);
-        high = high.max(value);
-    }
-    if low == high {
-        return if kurtosis { -3.0 } else { 0.0 };
-    }
-    let center = low * 0.5 + high * 0.5;
-    let scale = (high - center).abs().max((low - center).abs());
-    let n = window.len() as f64;
-    let mean = window.iter().map(|x| (x - center) / scale).sum::<f64>() / n;
-    let (mut m2, mut higher) = (0.0, 0.0);
-    for &value in window {
-        let delta = (value - center) / scale - mean;
-        let squared = delta * delta;
-        m2 += squared;
-        higher += if kurtosis {
-            squared * squared
-        } else {
-            squared * delta
+        if low == high {
+            return Self {
+                center: low,
+                ..Self::default()
+            };
+        }
+        let center = low * 0.5 + high * 0.5;
+        let scale = (high - center).abs().max((low - center).abs());
+        let mean = window.iter().map(|x| (x - center) / scale).sum::<f64>() / window.len() as f64;
+        let mut state = Self {
+            center,
+            scale,
+            mean,
+            ..Self::default()
         };
+        for &x in window {
+            let delta = (x - center) / scale - mean;
+            let square = delta * delta;
+            state.m2 += square;
+            state.m3 += square * delta;
+            if KURTOSIS {
+                state.m4 += square * square;
+            }
+        }
+        state.min_m2 = state.m2 * 0.01;
+        state.min_m4 = state.m4 * 0.01;
+        state
     }
-    m2 /= n;
-    higher /= n;
-    if kurtosis {
-        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * higher / (m2 * m2) - 3.0 * (n - 1.0))
-    } else {
-        (n * (n - 1.0)).sqrt() / (n - 2.0) * higher / (m2 * m2.sqrt())
+
+    // Translate central sums from the old mean to the new mean after replacing
+    // one sample. Returning false asks the caller to rebuild the current window.
+    fn replace<const KURTOSIS: bool>(&mut self, old: f64, new: f64, n: f64) -> bool {
+        if self.scale == 0.0 {
+            return new == self.center;
+        }
+        let incoming = (new - self.center) / self.scale;
+        if !incoming.is_finite() || incoming.abs() > 2.0 {
+            return false;
+        }
+        let a = (old - self.center) / self.scale - self.mean;
+        let b = incoming - self.mean;
+        let difference = b - a;
+        let shift = difference / n;
+        let square_change = difference * (a + b);
+        let cube_change = difference * (a * a + a * b + b * b);
+        let m2 = self.m2 + square_change - difference * shift;
+        let m3 = self.m3 + cube_change - 3.0 * shift * (self.m2 + square_change)
+            + 2.0 * difference * shift * shift;
+        let m4 = if KURTOSIS {
+            self.m4 + difference * (a + b) * (a * a + b * b) - 4.0 * shift * (self.m3 + cube_change)
+                + 6.0 * shift * shift * (self.m2 + square_change)
+                - 3.0 * difference * shift * shift * shift
+        } else {
+            0.0
+        };
+        // A sudden or gradual collapse since the last rebuild can expose
+        // cancellation residue from earlier, larger central sums.
+        // Rebuild instead of clamping it into a plausible but incorrect result.
+        if !m2.is_finite()
+            || !m3.is_finite()
+            || !m4.is_finite()
+            || m2 <= self.min_m2
+            || (KURTOSIS && m4 <= self.min_m4)
+        {
+            return false;
+        }
+        self.mean += shift;
+        self.m2 = m2;
+        self.m3 = m3;
+        self.m4 = m4;
+        self.min_m2 = self.min_m2.max(m2 * 0.01);
+        self.min_m4 = self.min_m4.max(m4 * 0.01);
+        true
     }
+
+    fn value<const KURTOSIS: bool>(&self, n: f64) -> f64 {
+        if self.scale == 0.0 {
+            return if KURTOSIS { -3.0 } else { 0.0 };
+        }
+        if KURTOSIS {
+            (n - 1.0) / ((n - 2.0) * (n - 3.0))
+                * ((n + 1.0) * n * self.m4 / (self.m2 * self.m2) - 3.0 * (n - 1.0))
+        } else {
+            n * (n - 1.0).sqrt() / (n - 2.0) * self.m3 / (self.m2 * self.m2.sqrt())
+        }
+    }
+}
+
+fn ts_rolling_moment<const KURTOSIS: bool>(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    if days < if KURTOSIS { 4 } else { 3 } {
+        return vec![f64::NAN; values.len()];
+    }
+    let n = days as f64;
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
+        let mut state = RollingMoments::default();
+        let mut finite_run = 0;
+        let mut since_rebuild = days;
+        for (local, cell) in out.iter_mut().enumerate() {
+            let idx = block.start + local;
+            let x = values[idx];
+            if !x.is_finite() {
+                finite_run = 0;
+                since_rebuild = days;
+                continue;
+            }
+            finite_run = (finite_run + 1).min(days);
+            if finite_run < days {
+                continue;
+            }
+            if since_rebuild >= days || !state.replace::<KURTOSIS>(values[idx - days], x, n) {
+                state = RollingMoments::rebuild::<KURTOSIS>(&values[idx + 1 - days..=idx]);
+                since_rebuild = 0;
+            }
+            *cell = state.value::<KURTOSIS>(n);
+            since_rebuild += 1;
+        }
+    })
 }
 
 /// Mean-seeded recursive EMA in symbol-major layout. Non-finite values reset

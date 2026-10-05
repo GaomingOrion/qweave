@@ -90,9 +90,12 @@ alphas = [
 ]
 ```
 
-All four work in the tree and DAG engines. Skew/Kurt currently compute central
-moments per window in `O(T*d)` time; EMA and WMA run in `O(T)`, where `T` is the
-number of rows per symbol.
+All four work in the tree and DAG engines. Skew/Kurt update rolling central
+moments incrementally, rebuilding every `d` rows to limit accumulated error,
+for `O(T)` total time under ordinary conditions. Large changes in scale or
+shrinking variation trigger additional window rebuilds, so extreme inputs can
+still require `O(T*d)` in the worst case. EMA and WMA run in `O(T)`, where `T`
+is the number of rows per symbol.
 
 **Rust WMA migration:** the former `alpha::wma`, using Guotai Junan's `0.9^age`
 weights, is now `alpha::gtja_wma` with node `Expr::GtjaWma`. `alpha::wma` now

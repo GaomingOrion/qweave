@@ -48,6 +48,8 @@ def decimal_moment(values, kurtosis):
         n = Decimal(len(xs))
         mean = sum(xs) / n
         m2 = sum((x - mean) ** 2 for x in xs) / n
+        if not m2:
+            return -3.0 if kurtosis else 0.0
         if kurtosis:
             m4 = sum((x - mean) ** 4 for x in xs) / n
             return float((n - 1) * ((n + 1) * m4 / m2**2 - 3 * (n - 1))
@@ -83,6 +85,62 @@ def test_window_boundaries_and_invalid_parameters(op, days):
         method(-1)
     with pytest.raises(TypeError):
         method(2.5)
+
+
+@pytest.mark.parametrize("days", [4, 20, 127])
+@pytest.mark.parametrize("op", ["ts_skew", "ts_kurt"])
+@pytest.mark.parametrize("scenario", ["random", "offset", "scale_change", "outlier", "constant", "missing", "decay"])
+def test_incremental_moments_match_decimal_after_window_updates(days, op, scenario):
+    rng = np.random.default_rng(42)
+    values = rng.normal(size=2048)
+    if scenario == "offset":
+        values = 1e12 + values * 0.01
+    elif scenario == "scale_change":
+        values[:512] *= 1e-150
+        values[512:1024] *= 1e150
+        values[1024:] *= 1e-150
+    elif scenario == "outlier":
+        values[512] = 1e100
+    elif scenario == "constant":
+        values[512:1024] = 7.0
+    elif scenario == "missing":
+        values[512:514] = math.nan
+        values[1024] = math.inf
+        values[1536] = -math.inf
+    elif scenario == "decay":
+        values *= np.exp(-np.arange(len(values)) * 30 / days)
+    actual = compute(values, op, days)
+    # Cover repeated rebuild boundaries and the exact bars where exceptional
+    # observations enter and leave the window, plus the end of a long stream.
+    indices = set(range(days - 1, len(values), 113))
+    for boundary in [days, 2 * days, 512, 513, 514, 1024, 1536, 2047]:
+        indices.update(boundary + shift for shift in [-1, 0, 1, days - 1, days, days + 1])
+    for i in sorted(indices):
+        if i < days - 1 or i >= len(values):
+            continue
+        window = values[i-days+1:i+1]
+        if not np.isfinite(window).all():
+            assert math.isnan(actual[i]), (scenario, days, i)
+        else:
+            expected = decimal_moment(window, op == "ts_kurt")
+            assert actual[i] == pytest.approx(expected, rel=1e-9, abs=1e-10), (scenario, days, i)
+
+
+@pytest.mark.parametrize("days", [512, 2048])
+@pytest.mark.parametrize("op", ["ts_skew", "ts_kurt"])
+@pytest.mark.parametrize("scenario", ["offset", "trend", "decay"])
+def test_incremental_moments_long_windows(days, op, scenario):
+    values = np.random.default_rng(81).normal(size=5 * days)
+    if scenario == "offset":
+        values = 1e12 + values * 0.01
+    elif scenario == "trend":
+        values = np.arange(len(values)) * 0.01 + values * 0.001
+    else:
+        values *= np.exp(-np.arange(len(values)) * 30 / days)
+    actual = compute(values, op, days)
+    for i in np.linspace(days - 1, len(values) - 1, 35, dtype=int):
+        expected = decimal_moment(values[i-days+1:i+1], op == "ts_kurt")
+        assert actual[i] == pytest.approx(expected, rel=1e-9, abs=1e-10), (scenario, days, i)
 
 
 @pytest.mark.parametrize("missing", [None, math.nan, math.inf, -math.inf])

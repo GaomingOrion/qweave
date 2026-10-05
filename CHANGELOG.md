@@ -7,6 +7,8 @@ and patch versions should remain backward compatible within a minor line.
 
 ## Unreleased
 
+- Optimized `ts_skew` and `ts_kurt` with incremental rolling central moments
+  and periodic rebuilds to control numerical error, preserving full-window rules.
 - Added Python/Rust `ts_skew`, `ts_kurt`, mean-seeded recursive `ema`, and
   standard linear `wma`, with tree/DAG support and consistent full-window APIs.
   Non-finite EMA inputs reset its state and restart warmup.

@@ -85,8 +85,10 @@ alphas = [
 ]
 ```
 
-四项均支持树执行器和 DAG。Skew/Kurt 首版按窗口计算中心矩，时间复杂度为
-`O(T*d)`；EMA 和 WMA 为 `O(T)`，其中 `T` 为每个 symbol 的行数。
+四项均支持树执行器和 DAG。Skew/Kurt 增量更新滑窗中心矩，每经过 `d` 行重新计算
+一次以控制累计误差，常规情况下总耗时为 `O(T)`。数值尺度剧变或波动大幅缩小时
+会额外重新计算窗口，因此极端输入下最坏为 `O(T*d)`。EMA 和 WMA 为 `O(T)`，
+其中 `T` 为每个 symbol 的行数。
 
 **Rust WMA 迁移：** 原 `alpha::wma` 的国泰君安 `0.9^age` 权重现名为
 `alpha::gtja_wma`，对应节点为 `Expr::GtjaWma`；`alpha::wma` 现在表示标准线性
