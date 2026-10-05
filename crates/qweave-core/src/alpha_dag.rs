@@ -6,10 +6,10 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::alpha_eval::{
-    cmp_value, correlation, covariance, decay_linear, delay, delta, group_neutralize, group_rank,
-    log_value, max_value, min_value, product, quantile, rank, resi, rsquare, scale, sign,
-    signed_power, slope, ts_argmax, ts_argmin, ts_max, ts_mean, ts_min, ts_rank, ts_rank_raw,
-    ts_std, ts_sum, where_value,
+    cmp_value, correlation, covariance, decay_linear, delay, delta, ema, group_neutralize,
+    group_rank, log_value, max_value, min_value, product, quantile, rank, resi, rsquare, scale,
+    sign, signed_power, slope, ts_argmax, ts_argmin, ts_kurt, ts_max, ts_mean, ts_min, ts_rank,
+    ts_rank_raw, ts_skew, ts_std, ts_sum, where_value,
 };
 use crate::cellset::CellSet;
 use crate::error::{QWeaveError, Result};
@@ -56,6 +56,9 @@ enum Node {
     TsRank(NodeId, usize),
     TsRankRaw(NodeId, usize),
     TsStd(NodeId, usize),
+    Ema(NodeId, usize),
+    TsKurt(NodeId, usize),
+    TsSkew(NodeId, usize),
     Slope(NodeId, usize),
     Rsquare(NodeId, usize),
     Resi(NodeId, usize),
@@ -126,6 +129,9 @@ impl Node {
             | Node::TsRank(inner, _)
             | Node::TsRankRaw(inner, _)
             | Node::TsStd(inner, _)
+            | Node::Ema(inner, _)
+            | Node::TsKurt(inner, _)
+            | Node::TsSkew(inner, _)
             | Node::Slope(inner, _)
             | Node::Rsquare(inner, _)
             | Node::Resi(inner, _)
@@ -188,6 +194,9 @@ impl Node {
             Node::TsRank(inner, days) => Node::TsRank(map(*inner), *days),
             Node::TsRankRaw(inner, days) => Node::TsRankRaw(map(*inner), *days),
             Node::TsStd(inner, days) => Node::TsStd(map(*inner), *days),
+            Node::Ema(inner, days) => Node::Ema(map(*inner), *days),
+            Node::TsKurt(inner, days) => Node::TsKurt(map(*inner), *days),
+            Node::TsSkew(inner, days) => Node::TsSkew(map(*inner), *days),
             Node::Slope(inner, days) => Node::Slope(map(*inner), *days),
             Node::Rsquare(inner, days) => Node::Rsquare(map(*inner), *days),
             Node::Resi(inner, days) => Node::Resi(map(*inner), *days),
@@ -270,8 +279,11 @@ impl Dag {
             Expr::TsRank(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRank),
             Expr::TsRankRaw(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRankRaw),
             Expr::TsStd(inner, days) => self.lower_ts_unary(inner, *days, Node::TsStd),
+            Expr::Ema(inner, days) => self.lower_ts_unary(inner, *days, Node::Ema),
+            Expr::TsKurt(inner, days) => self.lower_ts_unary(inner, *days, Node::TsKurt),
+            Expr::TsSkew(inner, days) => self.lower_ts_unary(inner, *days, Node::TsSkew),
             Expr::Sma(_, _, _)
-            | Expr::Wma(_, _)
+            | Expr::GtjaWma(_, _)
             | Expr::RollingBeta(_, _, _)
             | Expr::ConditionalBeta(_, _, _, _)
             | Expr::MultiResi(_, _, _, _, _)
@@ -975,6 +987,27 @@ impl Dag {
                 cs,
                 |values, cs| ts_std(values, days, cs),
             ),
+            Node::TsSkew(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ts_skew(values, days, cs),
+            ),
+            Node::TsKurt(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ts_kurt(values, days, cs),
+            ),
+            Node::Ema(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ema(values, days, cs),
+            ),
             Node::Slope(inner, days) => eval_cells_unary(
                 slot_value(slots, inner),
                 Layout::Nt,
@@ -1576,6 +1609,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn standard_time_series_nodes_deduplicate_and_match_tree() -> Result<()> {
+        use crate::alpha::{col, decay_linear, ema, lit, rank, ts_kurt, ts_skew, wma};
+
+        let cs = test_cellset_fields(
+            HashMap::from([(
+                "x".to_string(),
+                vec![1.0, 5.0, 2.0, 7.0, 15.0, 6.0, 6.0, 15.0, 7.0, 2.0, 5.0, 1.0],
+            )]),
+            vec![0..6, 6..12],
+            (0..6).map(|i| 2 * i..2 * i + 2).collect(),
+            (0..6).flat_map(|i| [i, i + 6]).collect(),
+        );
+        for make in [ts_skew, ts_kurt, ema, wma] {
+            // Cross-sectional input and output exercise both layout conversions.
+            let expr = make(rank(col("x")), 4);
+            let mut dag = Dag::default();
+            let root = dag.lower(&expr);
+            let count = dag.node_count();
+            assert_eq!(dag.lower(&expr), root);
+            assert_eq!(dag.node_count(), count);
+            assert_vec_close(&eval_dag(&expr, &cs)?, &eval_tree(&expr, &cs)?);
+            let nested = rank(expr.clone() + expr);
+            assert_vec_close(&eval_dag(&nested, &cs)?, &eval_tree(&nested, &cs)?);
+            let scalar = make(lit(2.0), 4);
+            assert_vec_close(&eval_dag(&scalar, &cs)?, &eval_tree(&scalar, &cs)?);
+        }
+        let mut dag = Dag::default();
+        assert_eq!(
+            dag.lower(&wma(col("x"), 3)),
+            dag.lower(&decay_linear(col("x"), 3))
+        );
+        Ok(())
     }
 
     #[test]

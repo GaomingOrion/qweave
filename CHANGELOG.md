@@ -5,6 +5,17 @@ All notable changes will be documented in this file.
 The project follows pre-1.0 semantic versioning: minor versions may change APIs,
 and patch versions should remain backward compatible within a minor line.
 
+## Unreleased
+
+- Added Python/Rust `ts_skew`, `ts_kurt`, mean-seeded recursive `ema`, and
+  standard linear `wma`, with tree/DAG support and consistent full-window APIs.
+  Non-finite EMA inputs reset its state and restart warmup.
+- **Breaking (Rust):** the former Guotai Junan `alpha::wma` / `Expr::Wma` are now
+  `alpha::gtja_wma` / `Expr::GtjaWma`. `alpha::wma` now aliases `decay_linear`
+  with linear weights. Alpha191 factor values are unchanged by this rename.
+- Added bilingual Qlib operator migration tables covering the v0.9.7 registry,
+  including warmup, EMA initialization, and WMA normalization differences.
+
 ## v0.6.0 - 2026-07-17
 
 - **Breaking:** `compute_alphas` now returns rows sorted by `(symbol, time)`

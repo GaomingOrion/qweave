@@ -130,8 +130,48 @@ pub fn sma(x: Expr, d: usize, m: usize) -> Expr {
     Expr::Sma(Box::new(x), d, m)
 }
 
+/// Build the Guotai Junan weighted mean of `x` over `d` bars.
+///
+/// Weights are normalized `0.9^age` (age zero is the current bar). Incomplete,
+/// NaN-containing, or zero-length windows yield NaN. Construction is infallible.
+/// Use [`wma`] for the standard linearly weighted moving average.
+pub fn gtja_wma(x: Expr, d: usize) -> Expr {
+    Expr::GtjaWma(Box::new(x), d)
+}
+
+/// Build bias-corrected sample skewness of `x` over `d` bars.
+///
+/// Requires a full finite window and `d >= 3`; otherwise evaluation yields NaN.
+/// Constant windows yield zero. Construction is infallible.
+pub fn ts_skew(x: Expr, d: usize) -> Expr {
+    Expr::TsSkew(Box::new(x), d)
+}
+
+/// Build bias-corrected Fisher excess kurtosis of `x` over `d` bars.
+///
+/// Requires a full finite window and `d >= 4`; otherwise evaluation yields NaN.
+/// Constant windows yield -3, matching pandas rolling kurtosis.
+/// Construction is infallible.
+pub fn ts_kurt(x: Expr, d: usize) -> Expr {
+    Expr::TsKurt(Box::new(x), d)
+}
+
+/// Build an EMA of `x` with smoothing coefficient `2 / (d + 1)`.
+///
+/// Each symbol starts with the mean of `d` consecutive finite samples, then
+/// updates recursively. Non-finite samples yield NaN and restart warmup.
+/// A zero period yields NaN throughout; construction is infallible.
+pub fn ema(x: Expr, d: usize) -> Expr {
+    Expr::Ema(Box::new(x), d)
+}
+
+/// Build a linearly weighted moving average of `x` over `d` bars.
+///
+/// Weights run from 1 (oldest) to `d` (newest), normalized by their sum.
+/// This is an alias for [`decay_linear`], including its full-window NaN behavior.
+/// A zero period yields NaN throughout; construction is infallible.
 pub fn wma(x: Expr, d: usize) -> Expr {
-    Expr::Wma(Box::new(x), d)
+    decay_linear(x, d)
 }
 
 pub fn rolling_beta(y: Expr, x: Expr, d: usize) -> Expr {

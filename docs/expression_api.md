@@ -24,7 +24,7 @@ intraday_return = (
 
 通用口径：
 
-- **时序算子**按 symbol 独立计算，窗口为最近 `d` 个 bar。窗口未满或窗口内含
+- **固定窗口聚合算子**按 symbol 独立计算，窗口为最近 `d` 个 bar。窗口未满或窗口内含
   NaN 时输出 NaN，因此每个 symbol 的前 `d - 1` 行为 NaN。
 - **截面算子**在每个时间点的全截面上计算，NaN 样本不参与且保持 NaN。
 - **比较算子**输出 1.0 / 0.0；任一操作数为 NaN 时输出 NaN。
@@ -55,11 +55,43 @@ intraday_return = (
 | `ts_rank(d)` | 当前值在窗口内的百分位 rank，取值 `(0, 1]`，ties 取平均（pandas `rank(pct=True)` 口径） |
 | `ts_rank_raw(d)` | 当前值的 0-based 升序位置，ties 取最小（DolphinDB `mrank` 口径） |
 | `ts_std(d)` | 样本标准差（`ddof = 1`） |
+| `ts_skew(d)` | 偏差修正的样本偏度，至少 3 个样本；完整常数窗口为 0 |
+| `ts_kurt(d)` | 偏差修正的 Fisher 超额峰度，至少 4 个样本；完整常数窗口为 -3 |
 | `slope(d)` / `rsquare(d)` / `resi(d)` | 窗口值对时间索引的 OLS 斜率 / R² / 最后一点残差 |
 | `quantile(d, q)` | 窗口分位数，`q ∈ [0, 1]`，线性插值 |
-| `decay_linear(d)` | 线性加权平均，权重 `1..d`，越新的 bar 权重越大 |
+| `wma(d)` / `decay_linear(d)` | 相同的线性加权平均，权重 `1..d`，越新的 bar 权重越大 |
 | `correlation(x, y, d)` | 窗口 Pearson 相关；任一侧零方差时为 NaN |
 | `covariance(x, y, d)` | 窗口样本协方差（`ddof = 1`） |
+
+固定窗口接口统一不提供 `min_periods`。`ts_skew`、`ts_kurt` 需要完整有限窗口，
+NaN、null、无穷值都会使该窗口输出 NaN；不满足最低样本数时也输出 NaN。
+`wma` 直接复用 `decay_linear` 的完整窗口与缺失值规则，二者在 DAG 中共用节点。
+零窗口输出 NaN；负数或非整数窗口由 Python 绑定拒绝。
+
+### 指数平滑
+
+`ema(days)` 按 symbol 计算技术指标 EMA：前 `days` 个连续有限样本的均值作为
+初值，此后按 `y = (1 - alpha) * y_prev + alpha * x` 递推，
+`alpha = 2 / (days + 1)`。初始化前输出 NaN；NaN、null 或无穷值使状态清空，
+需要重新收集 `days` 个连续有限样本。`days=1` 保留有限输入，`days=0` 全为 NaN。
+它使用已有全部历史状态，而不是每行重算最近 `days` 个 bar 的指数加权平均。
+
+```python
+alphas = [
+    qw.col("close").ts_skew(20).alias("skew20"),
+    qw.col("close").ts_kurt(20).alias("kurt20"),
+    qw.col("close").ema(20).alias("ema20"),
+    qw.col("close").wma(20).alias("wma20"),
+]
+```
+
+四项均支持树执行器和 DAG。Skew/Kurt 首版按窗口计算中心矩，时间复杂度为
+`O(T*d)`；EMA 和 WMA 为 `O(T)`，其中 `T` 为每个 symbol 的行数。
+
+**Rust WMA 迁移：** 原 `alpha::wma` 的国泰君安 `0.9^age` 权重现名为
+`alpha::gtja_wma`，对应节点为 `Expr::GtjaWma`；`alpha::wma` 现在表示标准线性
+WMA。Alpha191 内部已迁移，因子数值保持不变。Python 不暴露国泰君安专用 WMA。
+Qlib 的同名算子不能一概直接替换，见[算子迁移对照](qlib_operators.md)。
 
 ### 截面（逐时间点）
 

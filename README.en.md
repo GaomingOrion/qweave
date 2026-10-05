@@ -109,6 +109,9 @@ python examples\quickstart.py
   same DAG as rolling time-series operators, so one `compute_alphas` call runs
   everything — no staged provider/handler workflow that fetches features first
   and organizes cross-sectional computation separately.
+- **Common time-series statistics:** `ts_skew`, `ts_kurt`, mean-seeded `ema`,
+  and standard linear `wma` use consistent period arguments; see the
+  [Qlib operator migration reference](docs/qlib_operators.en.md) for differences.
 - **Execute the whole factor batch once:** expressions enter one Rust DAG with
   common-subexpression reuse, intermediate-slot reuse, fused elementwise
   chains, and node-level parallelism.

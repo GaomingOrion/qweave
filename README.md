@@ -98,6 +98,8 @@ python examples\quickstart.py
 - **截面因子和时序因子写在同一个表达式里：** `rank`、`group_neutralize` 等
   截面算子与 rolling 时序算子在同一个 DAG 中，一次 `compute_alphas` 跑完，
   不用像 provider/handler 工作流那样分阶段先取特征、再另行组织截面计算。
+- **常用时序统计：** `ts_skew`、`ts_kurt`、均值初始化的 `ema` 和标准线性
+  `wma`，使用统一的窗口参数；[Qlib 算子迁移对照](docs/qlib_operators.md)说明口径差异。
 - **一次执行整批因子：** 多个表达式进入同一 Rust DAG，统一完成公共子表达式复用、
   中间 slot 复用、elementwise chain 融合和节点级并行。
 - **450 个可组合经典因子：** WorldQuant Alpha101、Qlib Alpha158 和国泰君安

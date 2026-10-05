@@ -33,8 +33,9 @@ Extra time series are panel columns repeated for every asset on the same date.
 suspension-fill, or benchmark-calendar rules; callers must normalize them first.
 
 `SMA(A,n,m)` uses recursive smoothing with coefficient `m/n`; `WMA(A,n)` uses the
-report's `0.9^i` weights. Ranking, full-window, and missing-value behavior follows
-qweave's expression engine. See [formula sources](gtja_alpha191_sources.en.md) for
+report's `0.9^i` weights, explicitly named `gtja_wma` in Rust. Public `wma`
+uses standard linear weights; this rename does not change Alpha191 values.
+Ranking, full-window, and missing-value behavior follows qweave's expression engine. See [formula sources](gtja_alpha191_sources.en.md) for
 source pages and known ambiguities.
 
 ## Verification

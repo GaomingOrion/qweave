@@ -143,6 +143,103 @@ impl PyExpr {
         self.unary(|x| alpha::ts_std(x, days))
     }
 
+    /// Bias-corrected sample skewness over ``days`` bars.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative period in bars. Requires days >= 3 and a full finite
+    ///     window. Constant windows yield 0.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     A new, unaliased expression; no data is evaluated at construction.
+    ///     Zero or insufficient periods yield NaN when evaluated.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or outside the platform's unsigned integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn ts_skew(&self, days: usize) -> Self {
+        self.unary(|x| alpha::ts_skew(x, days))
+    }
+
+    /// Bias-corrected Fisher excess kurtosis over ``days`` bars.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative period in bars. Requires days >= 4 and a full finite
+    ///     window. Constant windows yield -3.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     A new, unaliased expression; no data is evaluated at construction.
+    ///     Zero or insufficient periods yield NaN when evaluated.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or outside the platform's unsigned integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn ts_kurt(&self, days: usize) -> Self {
+        self.unary(|x| alpha::ts_kurt(x, days))
+    }
+
+    /// Mean-seeded exponential moving average over each symbol.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative period in bars. Uses alpha = 2/(days+1). The first days
+    ///     consecutive finite samples seed the mean; non-finite samples reset
+    ///     the state and restart warmup.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     A new, unaliased expression; no data is evaluated at construction.
+    ///     Zero or insufficient periods yield NaN when evaluated.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or outside the platform's unsigned integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn ema(&self, days: usize) -> Self {
+        self.unary(|x| alpha::ema(x, days))
+    }
+
+    /// Linearly weighted moving average over ``days`` bars.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative period in bars. Weights are 1..days from oldest to newest.
+    ///     Equivalent to decay_linear; requires a full NaN-free window.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     A new, unaliased expression; no data is evaluated at construction.
+    ///     Zero or insufficient periods yield NaN when evaluated.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or outside the platform's unsigned integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn wma(&self, days: usize) -> Self {
+        self.unary(|x| alpha::wma(x, days))
+    }
+
     fn slope(&self, days: usize) -> Self {
         self.unary(|x| alpha::slope(x, days))
     }

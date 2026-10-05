@@ -106,13 +106,25 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(ts_std(&values, *days, cs), Layout::Nt))
         }
+        Expr::TsSkew(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(ts_skew(&values, *days, cs), Layout::Nt))
+        }
+        Expr::TsKurt(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(ts_kurt(&values, *days, cs), Layout::Nt))
+        }
+        Expr::Ema(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(ema(&values, *days, cs), Layout::Nt))
+        }
         Expr::Sma(inner, days, weight) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(sma(&values, *days, *weight, cs), Layout::Nt))
         }
-        Expr::Wma(inner, days) => {
+        Expr::GtjaWma(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
-            Ok(owned_cells(wma(&values, *days, cs), Layout::Nt))
+            Ok(owned_cells(gtja_wma(&values, *days, cs), Layout::Nt))
         }
         Expr::Slope(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
@@ -401,7 +413,8 @@ pub(crate) fn sma(values: &[f64], days: usize, weight: usize, cs: &CellSet) -> V
     })
 }
 
-pub(crate) fn wma(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+/// Guotai Junan finite-window weighting, distinct from standard linear WMA.
+pub(crate) fn gtja_wma(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_window(values, days, cs, |window| {
         let mut weight = 0.9f64.powi(days.saturating_sub(1) as i32);
         let mut weighted = 0.0;
@@ -412,6 +425,103 @@ pub(crate) fn wma(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
             weight /= 0.9;
         }
         weighted / total
+    })
+}
+
+/// Full finite-window, bias-corrected skewness in symbol-major layout.
+pub(crate) fn ts_skew(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    if days < 3 {
+        return vec![f64::NAN; values.len()];
+    }
+    ts_window(values, days, cs, |window| {
+        standardized_moment(window, false)
+    })
+}
+
+/// Full finite-window, bias-corrected Fisher excess kurtosis in symbol-major layout.
+pub(crate) fn ts_kurt(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    if days < 4 {
+        return vec![f64::NAN; values.len()];
+    }
+    ts_window(values, days, cs, |window| standardized_moment(window, true))
+}
+
+// Center before scaling to retain small variations on a large offset. Scaling
+// bounds the central powers and avoids overflow/underflow in the moment ratios.
+fn standardized_moment(window: &[f64], kurtosis: bool) -> f64 {
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for &value in window {
+        if !value.is_finite() {
+            return f64::NAN;
+        }
+        low = low.min(value);
+        high = high.max(value);
+    }
+    if low == high {
+        return if kurtosis { -3.0 } else { 0.0 };
+    }
+    let center = low * 0.5 + high * 0.5;
+    let scale = (high - center).abs().max((low - center).abs());
+    let n = window.len() as f64;
+    let mean = window.iter().map(|x| (x - center) / scale).sum::<f64>() / n;
+    let (mut m2, mut higher) = (0.0, 0.0);
+    for &value in window {
+        let delta = (value - center) / scale - mean;
+        let squared = delta * delta;
+        m2 += squared;
+        higher += if kurtosis {
+            squared * squared
+        } else {
+            squared * delta
+        };
+    }
+    m2 /= n;
+    higher /= n;
+    if kurtosis {
+        (n - 1.0) / ((n - 2.0) * (n - 3.0)) * ((n + 1.0) * higher / (m2 * m2) - 3.0 * (n - 1.0))
+    } else {
+        (n * (n - 1.0)).sqrt() / (n - 2.0) * higher / (m2 * m2.sqrt())
+    }
+}
+
+/// Mean-seeded recursive EMA in symbol-major layout. Non-finite values reset
+/// the state and require another `days` consecutive finite samples to emit.
+pub(crate) fn ema(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    if days == 0 {
+        return vec![f64::NAN; values.len()];
+    }
+    let period = days as f64;
+    let alpha = 2.0 / (period + 1.0);
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
+        let mut count = 0;
+        let mut state = 0.0;
+        for (local, cell) in out.iter_mut().enumerate() {
+            let value = values[block.start + local];
+            if !value.is_finite() {
+                count = 0;
+                state = 0.0;
+                continue;
+            }
+            let weight = if count < days {
+                count += 1;
+                1.0 / count as f64
+            } else {
+                alpha
+            };
+            // Online mean during warmup, then EMA. The difference form keeps
+            // large constants exact; opposite extreme signs need the weighted
+            // form to avoid overflowing the subtraction.
+            let delta = value - state;
+            state = if delta.is_finite() {
+                state + weight * delta
+            } else {
+                (1.0 - weight) * state + weight * value
+            };
+            if count == days {
+                *cell = state;
+            }
+        }
     })
 }
 
@@ -1599,7 +1709,7 @@ mod tests {
             &sma(&cs.fields["x"], 2, 1, &cs),
             &[1.0, 1.5, 2.25, 3.125, 4.0625],
         );
-        let wma_values = wma(&cs.fields["x"], 3, &cs);
+        let wma_values = gtja_wma(&cs.fields["x"], 3, &cs);
         assert!(wma_values[0].is_nan() && wma_values[1].is_nan());
         assert_f64_eq(wma_values[2], (1.0 * 0.81 + 2.0 * 0.9 + 3.0) / 2.71);
 

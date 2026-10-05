@@ -33,8 +33,15 @@ pub enum Expr {
     TsRank(Box<Expr>, usize),
     TsRankRaw(Box<Expr>, usize),
     TsStd(Box<Expr>, usize),
+    /// EMA seeded by a full-window mean; non-finite samples reset the warmup.
+    Ema(Box<Expr>, usize),
+    /// Full-window bias-corrected Fisher excess kurtosis; windows smaller than 4 yield NaN.
+    TsKurt(Box<Expr>, usize),
+    /// Full-window bias-corrected sample skewness; windows smaller than 3 yield NaN.
+    TsSkew(Box<Expr>, usize),
     Sma(Box<Expr>, usize, usize),
-    Wma(Box<Expr>, usize),
+    /// Guotai Junan finite-window mean with normalized 0.9^age weights.
+    GtjaWma(Box<Expr>, usize),
     Slope(Box<Expr>, usize),
     Rsquare(Box<Expr>, usize),
     Resi(Box<Expr>, usize),
@@ -83,8 +90,11 @@ impl fmt::Display for Expr {
             Expr::TsRank(inner, days) => write!(f, "ts_rank({inner}, {days})"),
             Expr::TsRankRaw(inner, days) => write!(f, "ts_rank_raw({inner}, {days})"),
             Expr::TsStd(inner, days) => write!(f, "ts_std({inner}, {days})"),
+            Expr::Ema(inner, days) => write!(f, "ema({inner}, {days})"),
+            Expr::TsKurt(inner, days) => write!(f, "ts_kurt({inner}, {days})"),
+            Expr::TsSkew(inner, days) => write!(f, "ts_skew({inner}, {days})"),
             Expr::Sma(inner, days, weight) => write!(f, "sma({inner}, {days}, {weight})"),
-            Expr::Wma(inner, days) => write!(f, "wma({inner}, {days})"),
+            Expr::GtjaWma(inner, days) => write!(f, "gtja_wma({inner}, {days})"),
             Expr::Slope(inner, days) => write!(f, "slope({inner}, {days})"),
             Expr::Rsquare(inner, days) => write!(f, "rsquare({inner}, {days})"),
             Expr::Resi(inner, days) => write!(f, "resi({inner}, {days})"),
@@ -193,8 +203,11 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
         | Expr::TsStd(inner, _)
+        | Expr::Ema(inner, _)
+        | Expr::TsKurt(inner, _)
+        | Expr::TsSkew(inner, _)
         | Expr::Sma(inner, _, _)
-        | Expr::Wma(inner, _)
+        | Expr::GtjaWma(inner, _)
         | Expr::Slope(inner, _)
         | Expr::Rsquare(inner, _)
         | Expr::Resi(inner, _)
@@ -263,8 +276,11 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
         | Expr::TsStd(inner, _)
+        | Expr::Ema(inner, _)
+        | Expr::TsKurt(inner, _)
+        | Expr::TsSkew(inner, _)
         | Expr::Sma(inner, _, _)
-        | Expr::Wma(inner, _)
+        | Expr::GtjaWma(inner, _)
         | Expr::Slope(inner, _)
         | Expr::Rsquare(inner, _)
         | Expr::Resi(inner, _)
@@ -301,10 +317,13 @@ pub fn rename_fields(expr: &Expr, names: &BTreeMap<String, String>) -> Expr {
         Expr::TsRank(inner, days) => unary_window(inner, *days, names, Expr::TsRank),
         Expr::TsRankRaw(inner, days) => unary_window(inner, *days, names, Expr::TsRankRaw),
         Expr::TsStd(inner, days) => unary_window(inner, *days, names, Expr::TsStd),
+        Expr::Ema(inner, days) => unary_window(inner, *days, names, Expr::Ema),
+        Expr::TsKurt(inner, days) => unary_window(inner, *days, names, Expr::TsKurt),
+        Expr::TsSkew(inner, days) => unary_window(inner, *days, names, Expr::TsSkew),
         Expr::Sma(inner, days, weight) => {
             Expr::Sma(Box::new(rename_fields(inner, names)), *days, *weight)
         }
-        Expr::Wma(inner, days) => unary_window(inner, *days, names, Expr::Wma),
+        Expr::GtjaWma(inner, days) => unary_window(inner, *days, names, Expr::GtjaWma),
         Expr::Slope(inner, days) => unary_window(inner, *days, names, Expr::Slope),
         Expr::Rsquare(inner, days) => unary_window(inner, *days, names, Expr::Rsquare),
         Expr::Resi(inner, days) => unary_window(inner, *days, names, Expr::Resi),

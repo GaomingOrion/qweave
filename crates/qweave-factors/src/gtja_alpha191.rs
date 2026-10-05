@@ -298,7 +298,7 @@ fn alpha_026() -> Expr {
 
 fn alpha_027() -> Expr {
     let _close = close();
-    wma(
+    gtja_wma(
         ((((_close.clone() - delay(_close.clone(), 3)) / delay(_close.clone(), 3)) * c(100.0))
             + (((_close.clone() - delay(_close.clone(), 6)) / delay(_close.clone(), 6))
                 * c(100.0))),
@@ -339,7 +339,7 @@ fn alpha_029() -> Expr {
 
 fn alpha_030() -> Expr {
     let _close = close();
-    wma(
+    gtja_wma(
         power(
             multi_resi(
                 ((_close.clone() / delay(_close.clone(), 1)) - c(1.0)),

@@ -24,7 +24,7 @@ Expressions must be aliased before they are passed to `compute_alphas` or
 
 Shared calibers:
 
-- **Time-series operators** run per symbol over the most recent `d` bars. The
+- **Fixed-window aggregations** run per symbol over the most recent `d` bars. The
   output is NaN while the window is incomplete or contains any NaN, so the
   first `d - 1` rows of each symbol are NaN.
 - **Cross-sectional operators** run over the full cross-section of each
@@ -57,11 +57,49 @@ Shared calibers:
 | `ts_rank(d)` | percentile rank of the current value within the window, in `(0, 1]`, ties averaged (pandas `rank(pct=True)` caliber) |
 | `ts_rank_raw(d)` | 0-based ascending position of the current value, minimum on ties (DolphinDB `mrank` caliber) |
 | `ts_std(d)` | sample standard deviation (`ddof = 1`) |
+| `ts_skew(d)` | bias-corrected sample skewness, at least 3 samples; full constant windows yield 0 |
+| `ts_kurt(d)` | bias-corrected Fisher excess kurtosis, at least 4 samples; full constant windows yield -3 |
 | `slope(d)` / `rsquare(d)` / `resi(d)` | OLS of window values against the time index: slope / R² / last-point residual |
 | `quantile(d, q)` | window quantile, `q ∈ [0, 1]`, linear interpolation |
-| `decay_linear(d)` | linearly weighted mean with weights `1..d`, newer bars weighted more |
+| `wma(d)` / `decay_linear(d)` | identical linearly weighted means with weights `1..d`, newer bars weighted more |
 | `correlation(x, y, d)` | window Pearson correlation; NaN when either side has zero variance |
 | `covariance(x, y, d)` | window sample covariance (`ddof = 1`) |
+
+Fixed-window interfaces consistently omit `min_periods`. `ts_skew` and `ts_kurt`
+require a full finite window: NaN, null, or infinity makes the window result NaN,
+as does a period below the statistical minimum. `wma` reuses `decay_linear`'s
+full-window and missing-value behavior; both share the same DAG node.
+Zero periods yield NaN; Python bindings reject negative or noninteger periods.
+
+### Exponential Smoothing
+
+`ema(days)` computes a technical-indicator EMA per symbol. The mean of the first
+`days` consecutive finite samples seeds the state, followed by the recurrence
+`y = (1 - alpha) * y_prev + alpha * x`, where `alpha = 2 / (days + 1)`.
+Outputs are NaN before initialization. NaN, null, or infinity resets the state
+and requires another `days` consecutive finite samples. `days=1` preserves
+finite inputs; `days=0` yields NaN throughout. This uses accumulated historical
+state, not an exponential average recomputed over the last `days` bars.
+
+```python
+alphas = [
+    qw.col("close").ts_skew(20).alias("skew20"),
+    qw.col("close").ts_kurt(20).alias("kurt20"),
+    qw.col("close").ema(20).alias("ema20"),
+    qw.col("close").wma(20).alias("wma20"),
+]
+```
+
+All four work in the tree and DAG engines. Skew/Kurt currently compute central
+moments per window in `O(T*d)` time; EMA and WMA run in `O(T)`, where `T` is the
+number of rows per symbol.
+
+**Rust WMA migration:** the former `alpha::wma`, using Guotai Junan's `0.9^age`
+weights, is now `alpha::gtja_wma` with node `Expr::GtjaWma`. `alpha::wma` now
+means standard linear WMA. Alpha191 calls have migrated without changing factor
+values. The Guotai Junan variant is not exposed in Python. Identically named
+Qlib operators are not always interchangeable; see the
+[operator migration reference](qlib_operators.en.md).
 
 ### Cross-Sectional (per timestamp)
 

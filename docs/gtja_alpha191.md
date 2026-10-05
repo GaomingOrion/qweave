@@ -30,8 +30,9 @@ out = qweave.compute_alphas(df, "asset", "time", alphas)
 输入阶段统一这些规则。
 
 `SMA(A,n,m)` 使用递归平滑系数 `m/n`；`WMA(A,n)` 使用原研报定义的 `0.9^i`
-权重。排名、满窗口和缺失值沿用 qweave 表达式引擎口径。详细来源、原始公式页码和
-已知歧义见[公式来源说明](gtja_alpha191_sources.md)。
+权重，在 Rust 中明确命名为 `gtja_wma`；公开的 `wma` 则为标准线性权重，
+本次命名调整不改变 Alpha191 因子值。排名、满窗口和缺失值沿用 qweave 表达式引擎
+口径。详细来源、原始公式页码和已知歧义见[公式来源说明](gtja_alpha191_sources.md)。
 
 ## 验证
 

@@ -89,7 +89,7 @@ pub fn eval_exprs(cs: &CellSet, exprs: &[Expr], output: Layout) -> Result<Vec<Ve
 fn requires_tree_engine(expr: &Expr) -> bool {
     match expr {
         Expr::Sma(_, _, _)
-        | Expr::Wma(_, _)
+        | Expr::GtjaWma(_, _)
         | Expr::RollingBeta(_, _, _)
         | Expr::ConditionalBeta(_, _, _, _)
         | Expr::MultiResi(_, _, _, _, _)
@@ -124,6 +124,9 @@ fn requires_tree_engine(expr: &Expr) -> bool {
         | Expr::TsRank(x, _)
         | Expr::TsRankRaw(x, _)
         | Expr::TsStd(x, _)
+        | Expr::Ema(x, _)
+        | Expr::TsKurt(x, _)
+        | Expr::TsSkew(x, _)
         | Expr::Slope(x, _)
         | Expr::Rsquare(x, _)
         | Expr::Resi(x, _)
@@ -232,6 +235,16 @@ fn build_full_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standard_time_series_preserve_dag_eligibility() {
+        use crate::alpha::{col, ema, gtja_wma, rank, ts_kurt, ts_skew, wma};
+        for make in [ts_skew, ts_kurt, ema, wma] {
+            assert!(!requires_tree_engine(&rank(make(col("close"), 5))));
+            // Traversal must still discover a legacy tree-only child.
+            assert!(requires_tree_engine(&make(gtja_wma(col("close"), 3), 5)));
+        }
+    }
 
     fn options() -> PanelOptions {
         PanelOptions {
