@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "qweave"
-version = "0.6.0"
+version = "0.6.1"
 description = "Polars-native factor research engine powered by Rust"
 readme = "README.en.md"
 license = { text = "MIT" }

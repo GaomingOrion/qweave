@@ -43,6 +43,10 @@ Install from PyPI (Python 3.10+):
 pip install qweave
 ```
 
+v0.6.1 adds Skew, Kurt, EMA, and standard WMA, with incremental rolling Skew/Kurt.
+See the [v0.6.1 release notes](.github/release-notes/v0.6.1.en.md) for Qlib alignment
+and the Rust WMA migration.
+
 Platform-specific wheels are also available from
 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest).
 For source builds see the [Development Guide](docs/development.en.md).

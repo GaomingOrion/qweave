@@ -40,6 +40,9 @@ pip install qweave
 如需指定平台的 wheel，见 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest)。
 从源码构建见[开发者手册](docs/development.md)。
 
+v0.6.1 新增 Skew、Kurt、EMA 和标准 WMA，支持 Skew/Kurt 滑窗增量计算。
+Qlib 对齐写法和 Rust WMA 迁移说明见 [v0.6.1 发布说明](.github/release-notes/v0.6.1.md)。
+
 ## 从行情面板到因子报告
 
 仓库内置一个 80 个资产 × 320 个交易日的确定性合成面板。以下代码混合两个经典因子
