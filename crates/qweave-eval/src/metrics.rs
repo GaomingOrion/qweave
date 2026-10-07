@@ -673,8 +673,9 @@ mod tests {
         assert_eq!(out.cov_valid.len(), n_days);
         assert!(out.cov_valid.iter().all(|&v| v == 3));
         assert_eq!(out.q_day.len(), n_days * 3);
-        for day in 0..n_days {
-            assert!((out.ic[day] - 1.0).abs() < 1e-12, "day {day}");
+        assert_eq!(out.ic.len(), n_days);
+        for (day, &ic) in out.ic.iter().enumerate() {
+            assert!((ic - 1.0).abs() < 1e-12, "day {day}");
         }
         // Quantile rows are sorted by day.
         assert!(out.q_day.windows(2).all(|w| w[0] <= w[1]));
