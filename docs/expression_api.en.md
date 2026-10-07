@@ -26,7 +26,8 @@ Shared calibers:
 
 - **Fixed-window aggregations** run per symbol over the most recent `d` bars. The
   output is NaN while the window is incomplete or contains any NaN, so the
-  first `d - 1` rows of each symbol are NaN.
+  first `d - 1` rows of each symbol are NaN. `ts_count` is the missing-value
+  exception: it counts present samples once all `d` rows are available.
 - **Cross-sectional operators** run over the full cross-section of each
   timestamp; NaN samples do not participate and stay NaN.
 - **Comparisons** output 1.0 / 0.0, and NaN when either operand is NaN.
@@ -36,7 +37,8 @@ Shared calibers:
 | Operator | Meaning |
 | --- | --- |
 | `+` `-` `*` `/`, unary `-` | arithmetic |
-| `<` `>` `<=` `>=` `==` | comparison: 1.0 if true, else 0.0 |
+| `<` `>` `<=` `>=` `==` `!=` | comparison: 1.0 if true, else 0.0 |
+| `&` / `\|` / `~` | three-valued logical AND / OR / NOT on Float64 masks |
 | `abs()` | absolute value |
 | `log()` | natural logarithm |
 | `sign()` | sign function (-1 / 0 / 1) |
@@ -44,6 +46,35 @@ Shared calibers:
 | `power(x, y)` | `x^y` |
 | `signed_power(x, y)` | `sign(x) * abs(x)^y` |
 | `where_(cond, a, b)` | `a` where `cond` holds, else `b` |
+
+Comparisons and logical operators return Float64 masks (`1.0`, `0.0`, or NaN),
+which can still be multiplied by values or passed to `ts_sum`. Logical inputs
+use the same positive-is-true rule as `where_`: positive values (including
+positive infinity) are true; zero, negative values, and negative infinity are
+false; NaN/null is unknown. These are logical operations, not integer bitwise
+operations. Both operands are evaluated; there is no short-circuit evaluation.
+
+| `a` | `b` | `a & b` | `a \| b` |
+| --- | --- | --- | --- |
+| false | false | 0 | 0 |
+| false | true | 0 | 1 |
+| false | unknown | 0 | NaN |
+| true | true | 1 | 1 |
+| true | unknown | NaN | 1 |
+| unknown | unknown | NaN | NaN |
+
+AND/OR are symmetric. NOT maps true to 0, false to 1, and unknown to NaN.
+Wrap constants in `qw.lit(...)` and parenthesize comparisons:
+
+```python
+mask = (qw.col("close") > qw.col("open")) & (qw.col("volume") != qw.lit(0.0))
+up_days = mask.ts_sum(20).alias("up_days")
+```
+
+**Behavior tightening:** implicit Python truth conversion now raises `TypeError`.
+Use `&`, `|`, and `~` instead of Python `and`, `or`, and `not`; `bool(expr)`,
+`if expr`, and chained comparisons such as `x < y < z` are also rejected.
+Write `(x < y) & (y < z)` instead.
 
 ### Time-Series Windows (per symbol, window `d`)
 
@@ -56,6 +87,8 @@ Shared calibers:
 | `ts_argmin(d)` / `ts_argmax(d)` | 0-based position of the extremum (0 = oldest, `d-1` = current; earliest wins ties) |
 | `ts_rank(d)` | percentile rank of the current value within the window, in `(0, 1]`, ties averaged (pandas `rank(pct=True)` caliber) |
 | `ts_rank_raw(d)` | 0-based ascending position of the current value, minimum on ties (DolphinDB `mrank` caliber) |
+| `ts_mad(d)` | mean absolute deviation about the same window's mean; full finite window required |
+| `ts_count(d)` | count of non-NaN/null samples after `d` rows; zero and infinities count |
 | `ts_std(d)` | sample standard deviation (`ddof = 1`) |
 | `ts_skew(d)` | bias-corrected sample skewness, at least 3 samples; full constant windows yield 0 |
 | `ts_kurt(d)` | bias-corrected Fisher excess kurtosis, at least 4 samples; full constant windows yield -3 |
@@ -70,6 +103,18 @@ require a full finite window: NaN, null, or infinity makes the window result NaN
 as does a period below the statistical minimum. `wma` reuses `decay_linear`'s
 full-window and missing-value behavior; both share the same DAG node.
 Zero periods yield NaN; Python bindings reject negative or noninteger periods.
+
+`ts_mad(d)` computes `mean(abs(x - mean(x)))` within one window, not median
+absolute deviation or a composition of two rolling means. NaN, null, or infinity
+makes the result NaN; constant windows and finite `d=1` windows yield 0. It uses
+centering and scaling to limit intermediate magnitudes, takes `O(T*d)` time,
+and allocates no temporary array per window.
+
+`ts_count(d)` requires `d` rows, but permits missing values: all-missing full
+windows yield 0. For `d=1`, missing samples yield 0 and all other samples yield 1.
+The first `d-1` rows still yield NaN. It updates the count on entry/exit, taking
+`O(T)` time and `O(1)` rolling state per symbol. Both operators support tree and
+DAG execution; `d=0` yields NaN, and negative/noninteger periods are rejected.
 
 ### Exponential Smoothing
 

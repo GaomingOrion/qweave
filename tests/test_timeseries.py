@@ -222,7 +222,7 @@ def test_wma_matches_direct_weights_and_decay_linear(days):
     np.testing.assert_allclose(compute([1.0] * 6, "wma", 3)[2:], 1.0)
 
 
-@pytest.mark.parametrize("op", OPS)
+@pytest.mark.parametrize("op", OPS + ("ts_mad", "ts_count"))
 def test_symbols_sorting_metadata_nested_expressions_and_file_output(op, tmp_path):
     values = [1.0, 5.0, 2.0, 7.0, 15.0, 6.0]
     a = pl.DataFrame({"asset": ["A"] * 6, "time": range(6), "price": values})

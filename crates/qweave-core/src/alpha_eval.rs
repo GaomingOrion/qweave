@@ -106,6 +106,14 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(ts_std(&values, *days, cs), Layout::Nt))
         }
+        Expr::TsMad(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(ts_mad(&values, *days, cs), Layout::Nt))
+        }
+        Expr::TsCount(inner, days) => {
+            let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
+            Ok(owned_cells(ts_count(&values, *days, cs), Layout::Nt))
+        }
         Expr::TsSkew(inner, days) => {
             let values = to_cells(eval(inner, cs)?, Layout::Nt, cs);
             Ok(owned_cells(ts_skew(&values, *days, cs), Layout::Nt))
@@ -230,9 +238,12 @@ pub fn eval<'cs>(expr: &Expr, cs: &'cs CellSet) -> Result<Val<'cs>> {
         Expr::Abs(inner) => eval_unary(inner, cs, f64::abs),
         Expr::Log(inner) => eval_unary(inner, cs, log_value),
         Expr::Sign(inner) => eval_unary(inner, cs, sign),
+        Expr::Not(inner) => eval_unary(inner, cs, not_value),
         Expr::SignedPower(lhs, rhs) => eval_binary(lhs, rhs, cs, signed_power),
         Expr::Power(lhs, rhs) => eval_binary(lhs, rhs, cs, |value, exponent| value.powf(exponent)),
         Expr::Min(lhs, rhs) => eval_binary(lhs, rhs, cs, min_value),
+        Expr::And(lhs, rhs) => eval_binary(lhs, rhs, cs, and_value),
+        Expr::Or(lhs, rhs) => eval_binary(lhs, rhs, cs, or_value),
         Expr::Max(lhs, rhs) => eval_binary(lhs, rhs, cs, max_value),
         Expr::Cmp(op, lhs, rhs) => eval_binary(lhs, rhs, cs, |lhs, rhs| cmp_value(*op, lhs, rhs)),
         Expr::Where(cond, when_true, when_false) => eval_where(cond, when_true, when_false, cs),
@@ -436,6 +447,58 @@ pub(crate) fn ts_skew(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
 /// Full finite-window, bias-corrected Fisher excess kurtosis in symbol-major layout.
 pub(crate) fn ts_kurt(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
     ts_rolling_moment::<true>(values, days, cs)
+}
+
+/// Count non-NaN samples after a full window of bars, independently per symbol.
+/// Infinities count as present; zero days yields NaN throughout.
+pub(crate) fn ts_count(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    if days == 0 {
+        return vec![f64::NAN; values.len()];
+    }
+    par_fill_blocks(values.len(), &cs.sym_blocks, |block, out| {
+        let mut count = 0usize;
+        for (local, cell) in out.iter_mut().enumerate() {
+            let idx = block.start + local;
+            count += usize::from(!values[idx].is_nan());
+            if local >= days {
+                count -= usize::from(!values[idx - days].is_nan());
+            }
+            if local + 1 >= days {
+                *cell = count as f64;
+            }
+        }
+    })
+}
+
+/// Mean absolute deviation about each full finite window's own mean.
+/// Invalid windows yield NaN; constant windows yield zero. No window allocations.
+pub(crate) fn ts_mad(values: &[f64], days: usize, cs: &CellSet) -> Vec<f64> {
+    ts_window(values, days, cs, |window| {
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        for &x in window {
+            if !x.is_finite() {
+                return f64::NAN;
+            }
+            low = low.min(x);
+            high = high.max(x);
+        }
+        if low == high {
+            return 0.0;
+        }
+        // Center before scaling to retain variations on large offsets and
+        // avoid overflowing either the mean or the sum of absolute deviations.
+        let center = low * 0.5 + high * 0.5;
+        let scale = (high - center).abs().max((low - center).abs());
+        let n = window.len() as f64;
+        let mean = window.iter().map(|x| (x - center) / scale).sum::<f64>() / n;
+        let mad = window
+            .iter()
+            .map(|x| ((x - center) / scale - mean).abs())
+            .sum::<f64>()
+            / n;
+        mad * scale
+    })
 }
 
 #[derive(Default)]
@@ -1696,6 +1759,39 @@ pub(crate) fn max_value(lhs: f64, rhs: f64) -> f64 {
     }
 }
 
+/// Three-valued conjunction: nonpositive wins over NaN; positive means true.
+pub(crate) fn and_value(lhs: f64, rhs: f64) -> f64 {
+    if lhs <= 0.0 || rhs <= 0.0 {
+        0.0
+    } else if lhs.is_nan() || rhs.is_nan() {
+        f64::NAN
+    } else {
+        1.0
+    }
+}
+
+/// Three-valued disjunction: positive wins over NaN; nonpositive means false.
+pub(crate) fn or_value(lhs: f64, rhs: f64) -> f64 {
+    if lhs > 0.0 || rhs > 0.0 {
+        1.0
+    } else if lhs.is_nan() || rhs.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    }
+}
+
+/// Negate a Float64 mask, preserving NaN as unknown.
+pub(crate) fn not_value(value: f64) -> f64 {
+    if value.is_nan() {
+        f64::NAN
+    } else if value > 0.0 {
+        0.0
+    } else {
+        1.0
+    }
+}
+
 pub(crate) fn cmp_value(op: CmpOp, lhs: f64, rhs: f64) -> f64 {
     if lhs.is_nan() || rhs.is_nan() {
         return f64::NAN;
@@ -1706,6 +1802,7 @@ pub(crate) fn cmp_value(op: CmpOp, lhs: f64, rhs: f64) -> f64 {
         CmpOp::Le => lhs <= rhs,
         CmpOp::Ge => lhs >= rhs,
         CmpOp::Eq => lhs == rhs,
+        CmpOp::Ne => lhs != rhs,
     };
     if is_true { 1.0 } else { 0.0 }
 }

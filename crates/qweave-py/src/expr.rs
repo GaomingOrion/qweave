@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pyo3::class::basic::CompareOp;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PySet;
 use qweave_core::Expr;
@@ -143,6 +143,53 @@ impl PyExpr {
         self.unary(|x| alpha::ts_std(x, days))
     }
 
+    /// Mean absolute deviation about each window's own mean.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative window length in bars. Requires a full finite window.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     New unaliased Float64 expression, evaluated later. Zero days,
+    ///     incomplete windows, or NaN/null/infinity yield NaN; constants yield 0.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or exceeds the platform integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn ts_mad(&self, days: usize) -> Self {
+        self.unary(|x| alpha::ts_mad(x, days))
+    }
+
+    /// Count nonmissing values in a full window of bars.
+    ///
+    /// Parameters
+    /// ----------
+    /// days : int
+    ///     Nonnegative window length in bars. The first days - 1 bars yield NaN.
+    ///
+    /// Returns
+    /// -------
+    /// PyExpr
+    ///     New unaliased Float64 expression, evaluated later. NaN/null are
+    ///     excluded, but zero and infinities count. Full all-missing windows
+    ///     yield 0; zero days yields NaN throughout.
+    ///
+    /// Raises
+    /// ------
+    /// OverflowError
+    ///     If days is negative or exceeds the platform integer range.
+    /// TypeError
+    ///     If days is not an integer.
+    fn ts_count(&self, days: usize) -> Self {
+        self.unary(|x| alpha::ts_count(x, days))
+    }
+
     /// Bias-corrected sample skewness over ``days`` bars.
     ///
     /// Parameters
@@ -280,14 +327,48 @@ impl PyExpr {
         self.neg()
     }
 
-    fn __richcmp__(&self, rhs: PyRef<'_, PyExpr>, op: CompareOp) -> PyResult<Self> {
+    /// Combine this mask with another PyExpr using three-valued logical AND.
+    /// Returns a new unaliased Float64 expression: positive is true, nonpositive
+    /// is false, NaN/null unknown. False AND unknown is false. Both operands
+    /// are evaluated later; a non-PyExpr operand raises TypeError.
+    fn __and__(&self, rhs: PyRef<'_, PyExpr>) -> Self {
+        self.binary(&rhs, alpha::and)
+    }
+
+    /// Combine this mask with another PyExpr using three-valued logical OR.
+    /// Returns a new unaliased Float64 expression: positive is true, nonpositive
+    /// is false, NaN/null unknown. True OR unknown is true. Both operands
+    /// are evaluated later; a non-PyExpr operand raises TypeError.
+    fn __or__(&self, rhs: PyRef<'_, PyExpr>) -> Self {
+        self.binary(&rhs, alpha::or)
+    }
+
+    /// Return an unaliased logical-NOT expression without evaluating data.
+    /// Positive values become 0, nonpositive become 1, and NaN/null stay unknown.
+    fn __invert__(&self) -> Self {
+        self.unary(alpha::not)
+    }
+
+    /// Always raise TypeError: an unevaluated expression has no Python truth value.
+    /// Use parenthesized comparisons with &, |, and ~ instead of and/or/not.
+    fn __bool__(&self) -> PyResult<bool> {
+        Err(PyTypeError::new_err(
+            "PyExpr has no Python truth value; use &, |, and ~ with parenthesized comparisons instead of and/or/not",
+        ))
+    }
+
+    /// Compare elementwise with another PyExpr, returning a new Float64 expression.
+    /// Results are 1 or 0, or NaN if either operand is NaN/null, including !=.
+    /// No data is evaluated here. Wrap constants in qw.lit(): other objects use
+    /// Python's equality/inequality fallback; ordered comparisons raise TypeError.
+    fn __richcmp__(&self, rhs: PyRef<'_, PyExpr>, op: CompareOp) -> Self {
         match op {
-            CompareOp::Lt => Ok(self.binary(&rhs, alpha::lt)),
-            CompareOp::Gt => Ok(self.binary(&rhs, alpha::gt)),
-            CompareOp::Le => Ok(self.binary(&rhs, alpha::le)),
-            CompareOp::Ge => Ok(self.binary(&rhs, alpha::ge)),
-            CompareOp::Eq => Ok(self.binary(&rhs, alpha::eq)),
-            CompareOp::Ne => Err(PyValueError::new_err("`!=` is not supported for PyExpr")),
+            CompareOp::Lt => self.binary(&rhs, alpha::lt),
+            CompareOp::Gt => self.binary(&rhs, alpha::gt),
+            CompareOp::Le => self.binary(&rhs, alpha::le),
+            CompareOp::Ge => self.binary(&rhs, alpha::ge),
+            CompareOp::Eq => self.binary(&rhs, alpha::eq),
+            CompareOp::Ne => self.binary(&rhs, alpha::ne),
         }
     }
 

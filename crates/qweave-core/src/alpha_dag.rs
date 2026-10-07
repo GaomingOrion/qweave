@@ -6,10 +6,11 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use crate::alpha_eval::{
-    cmp_value, correlation, covariance, decay_linear, delay, delta, ema, group_neutralize,
-    group_rank, log_value, max_value, min_value, product, quantile, rank, resi, rsquare, scale,
-    sign, signed_power, slope, ts_argmax, ts_argmin, ts_kurt, ts_max, ts_mean, ts_min, ts_rank,
-    ts_rank_raw, ts_skew, ts_std, ts_sum, where_value,
+    and_value, cmp_value, correlation, covariance, decay_linear, delay, delta, ema,
+    group_neutralize, group_rank, log_value, max_value, min_value, not_value, or_value, product,
+    quantile, rank, resi, rsquare, scale, sign, signed_power, slope, ts_argmax, ts_argmin,
+    ts_count, ts_kurt, ts_mad, ts_max, ts_mean, ts_min, ts_rank, ts_rank_raw, ts_skew, ts_std,
+    ts_sum, where_value,
 };
 use crate::cellset::CellSet;
 use crate::error::{QWeaveError, Result};
@@ -56,6 +57,8 @@ enum Node {
     TsRank(NodeId, usize),
     TsRankRaw(NodeId, usize),
     TsStd(NodeId, usize),
+    TsMad(NodeId, usize),
+    TsCount(NodeId, usize),
     Ema(NodeId, usize),
     TsKurt(NodeId, usize),
     TsSkew(NodeId, usize),
@@ -73,9 +76,12 @@ enum Node {
     Abs(NodeId),
     Log(NodeId),
     Sign(NodeId),
+    Not(NodeId),
     SignedPower(NodeId, NodeId),
     Power(NodeId, NodeId),
     Min(NodeId, NodeId),
+    And(NodeId, NodeId),
+    Or(NodeId, NodeId),
     Max(NodeId, NodeId),
     Cmp(CmpOp, NodeId, NodeId),
     Where(NodeId, NodeId, NodeId),
@@ -103,9 +109,12 @@ enum EwOp {
     Abs,
     Log,
     Sign,
+    Not,
     SignedPower,
     Power,
     Min,
+    And,
+    Or,
     Max,
     Cmp(CmpOp),
     Where,
@@ -128,6 +137,8 @@ impl Node {
             | Node::TsArgMax(inner, _)
             | Node::TsRank(inner, _)
             | Node::TsRankRaw(inner, _)
+            | Node::TsMad(inner, _)
+            | Node::TsCount(inner, _)
             | Node::TsStd(inner, _)
             | Node::Ema(inner, _)
             | Node::TsKurt(inner, _)
@@ -141,6 +152,7 @@ impl Node {
             | Node::Scale(inner, _)
             | Node::Abs(inner)
             | Node::Log(inner)
+            | Node::Not(inner)
             | Node::Sign(inner) => visit(*inner),
             Node::Add(lhs, rhs)
             | Node::Sub(lhs, rhs)
@@ -150,6 +162,8 @@ impl Node {
             | Node::Covariance(lhs, rhs, _)
             | Node::SignedPower(lhs, rhs)
             | Node::Power(lhs, rhs)
+            | Node::And(lhs, rhs)
+            | Node::Or(lhs, rhs)
             | Node::Min(lhs, rhs)
             | Node::Max(lhs, rhs)
             | Node::Cmp(_, lhs, rhs) => {
@@ -194,6 +208,8 @@ impl Node {
             Node::TsRank(inner, days) => Node::TsRank(map(*inner), *days),
             Node::TsRankRaw(inner, days) => Node::TsRankRaw(map(*inner), *days),
             Node::TsStd(inner, days) => Node::TsStd(map(*inner), *days),
+            Node::TsCount(inner, days) => Node::TsCount(map(*inner), *days),
+            Node::TsMad(inner, days) => Node::TsMad(map(*inner), *days),
             Node::Ema(inner, days) => Node::Ema(map(*inner), *days),
             Node::TsKurt(inner, days) => Node::TsKurt(map(*inner), *days),
             Node::TsSkew(inner, days) => Node::TsSkew(map(*inner), *days),
@@ -213,9 +229,12 @@ impl Node {
             Node::Abs(inner) => Node::Abs(map(*inner)),
             Node::Log(inner) => Node::Log(map(*inner)),
             Node::Sign(inner) => Node::Sign(map(*inner)),
+            Node::Not(inner) => Node::Not(map(*inner)),
             Node::SignedPower(lhs, rhs) => Node::SignedPower(map(*lhs), map(*rhs)),
             Node::Power(lhs, rhs) => Node::Power(map(*lhs), map(*rhs)),
             Node::Min(lhs, rhs) => Node::Min(map(*lhs), map(*rhs)),
+            Node::Or(lhs, rhs) => Node::Or(map(*lhs), map(*rhs)),
+            Node::And(lhs, rhs) => Node::And(map(*lhs), map(*rhs)),
             Node::Max(lhs, rhs) => Node::Max(map(*lhs), map(*rhs)),
             Node::Cmp(op, lhs, rhs) => Node::Cmp(*op, map(*lhs), map(*rhs)),
             Node::Where(cond, when_true, when_false) => {
@@ -279,6 +298,8 @@ impl Dag {
             Expr::TsRank(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRank),
             Expr::TsRankRaw(inner, days) => self.lower_ts_unary(inner, *days, Node::TsRankRaw),
             Expr::TsStd(inner, days) => self.lower_ts_unary(inner, *days, Node::TsStd),
+            Expr::TsCount(inner, days) => self.lower_ts_unary(inner, *days, Node::TsCount),
+            Expr::TsMad(inner, days) => self.lower_ts_unary(inner, *days, Node::TsMad),
             Expr::Ema(inner, days) => self.lower_ts_unary(inner, *days, Node::Ema),
             Expr::TsKurt(inner, days) => self.lower_ts_unary(inner, *days, Node::TsKurt),
             Expr::TsSkew(inner, days) => self.lower_ts_unary(inner, *days, Node::TsSkew),
@@ -349,6 +370,7 @@ impl Dag {
             Expr::Abs(inner) => self.lower_unary_elementwise(inner, Node::Abs, f64::abs),
             Expr::Log(inner) => self.lower_unary_elementwise(inner, Node::Log, log_value),
             Expr::Sign(inner) => self.lower_unary_elementwise(inner, Node::Sign, sign),
+            Expr::Not(inner) => self.lower_unary_elementwise(inner, Node::Not, not_value),
             Expr::SignedPower(lhs, rhs) => {
                 self.lower_binary_elementwise(lhs, rhs, Node::SignedPower, signed_power)
             }
@@ -358,6 +380,8 @@ impl Dag {
                 })
             }
             Expr::Min(lhs, rhs) => self.lower_binary_elementwise(lhs, rhs, Node::Min, min_value),
+            Expr::Or(lhs, rhs) => self.lower_binary_elementwise(lhs, rhs, Node::Or, or_value),
+            Expr::And(lhs, rhs) => self.lower_binary_elementwise(lhs, rhs, Node::And, and_value),
             Expr::Max(lhs, rhs) => self.lower_binary_elementwise(lhs, rhs, Node::Max, max_value),
             Expr::Cmp(op, lhs, rhs) => {
                 let op = *op;
@@ -811,9 +835,12 @@ impl Dag {
             Node::Abs(a) => unary!(a, EwOp::Abs),
             Node::Log(a) => unary!(a, EwOp::Log),
             Node::Sign(a) => unary!(a, EwOp::Sign),
+            Node::Not(a) => unary!(a, EwOp::Not),
             Node::SignedPower(a, b) => binary!(a, b, EwOp::SignedPower),
             Node::Power(a, b) => binary!(a, b, EwOp::Power),
             Node::Min(a, b) => binary!(a, b, EwOp::Min),
+            Node::Or(a, b) => binary!(a, b, EwOp::Or),
+            Node::And(a, b) => binary!(a, b, EwOp::And),
             Node::Max(a, b) => binary!(a, b, EwOp::Max),
             Node::Cmp(op, a, b) => binary!(a, b, EwOp::Cmp(*op)),
             Node::Where(cond, when_true, when_false) => {
@@ -987,6 +1014,20 @@ impl Dag {
                 cs,
                 |values, cs| ts_std(values, days, cs),
             ),
+            Node::TsCount(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ts_count(values, days, cs),
+            ),
+            Node::TsMad(inner, days) => eval_cells_unary(
+                slot_value(slots, inner),
+                Layout::Nt,
+                Layout::Nt,
+                cs,
+                |values, cs| ts_mad(values, days, cs),
+            ),
             Node::TsSkew(inner, days) => eval_cells_unary(
                 slot_value(slots, inner),
                 Layout::Nt,
@@ -1091,6 +1132,7 @@ impl Dag {
             Node::Abs(inner) => eval_unary_elementwise(slot_value(slots, inner), f64::abs),
             Node::Log(inner) => eval_unary_elementwise(slot_value(slots, inner), log_value),
             Node::Sign(inner) => eval_unary_elementwise(slot_value(slots, inner), sign),
+            Node::Not(inner) => eval_unary_elementwise(slot_value(slots, inner), not_value),
             Node::SignedPower(lhs, rhs) => eval_binary_elementwise(
                 slot_value(slots, lhs),
                 slot_value(slots, rhs),
@@ -1107,6 +1149,18 @@ impl Dag {
                 slot_value(slots, rhs),
                 cs,
                 min_value,
+            ),
+            Node::Or(lhs, rhs) => eval_binary_elementwise(
+                slot_value(slots, lhs),
+                slot_value(slots, rhs),
+                cs,
+                or_value,
+            ),
+            Node::And(lhs, rhs) => eval_binary_elementwise(
+                slot_value(slots, lhs),
+                slot_value(slots, rhs),
+                cs,
+                and_value,
             ),
             Node::Max(lhs, rhs) => eval_binary_elementwise(
                 slot_value(slots, lhs),
@@ -1143,9 +1197,12 @@ fn is_elementwise(node: &Node) -> bool {
             | Node::Neg(..)
             | Node::Abs(..)
             | Node::Log(..)
+            | Node::Not(..)
             | Node::Sign(..)
             | Node::SignedPower(..)
             | Node::Power(..)
+            | Node::And(..)
+            | Node::Or(..)
             | Node::Min(..)
             | Node::Max(..)
             | Node::Cmp(..)
@@ -1165,13 +1222,15 @@ fn program_max_depth(program: &[EwOp]) -> usize {
     for op in program {
         match op {
             EwOp::Leaf(_) | EwOp::Const(_) => depth += 1,
-            EwOp::Neg | EwOp::Abs | EwOp::Log | EwOp::Sign => {}
+            EwOp::Neg | EwOp::Abs | EwOp::Log | EwOp::Sign | EwOp::Not => {}
             EwOp::Add
             | EwOp::Sub
             | EwOp::Mul
             | EwOp::Div
             | EwOp::SignedPower
             | EwOp::Power
+            | EwOp::And
+            | EwOp::Or
             | EwOp::Min
             | EwOp::Max
             | EwOp::Cmp(_) => depth -= 1,
@@ -1247,9 +1306,12 @@ fn eval_fused_ew(
                     EwOp::Abs => unary!(f64::abs),
                     EwOp::Log => unary!(log_value),
                     EwOp::Sign => unary!(sign),
+                    EwOp::Not => unary!(not_value),
                     EwOp::SignedPower => binary!(signed_power),
                     EwOp::Power => binary!(|a: f64, b| a.powf(b)),
                     EwOp::Min => binary!(min_value),
+                    EwOp::And => binary!(and_value),
+                    EwOp::Or => binary!(or_value),
                     EwOp::Max => binary!(max_value),
                     EwOp::Cmp(cmp) => {
                         let cmp = *cmp;
@@ -1613,7 +1675,9 @@ mod tests {
 
     #[test]
     fn standard_time_series_nodes_deduplicate_and_match_tree() -> Result<()> {
-        use crate::alpha::{col, decay_linear, ema, lit, rank, ts_kurt, ts_skew, wma};
+        use crate::alpha::{
+            col, decay_linear, ema, lit, rank, ts_count, ts_kurt, ts_mad, ts_skew, wma,
+        };
 
         let cs = test_cellset_fields(
             HashMap::from([(
@@ -1624,7 +1688,7 @@ mod tests {
             (0..6).map(|i| 2 * i..2 * i + 2).collect(),
             (0..6).flat_map(|i| [i, i + 6]).collect(),
         );
-        for make in [ts_skew, ts_kurt, ema, wma] {
+        for make in [ts_skew, ts_kurt, ema, wma, ts_mad, ts_count] {
             // Cross-sectional input and output exercise both layout conversions.
             let expr = make(rank(col("x")), 4);
             let mut dag = Dag::default();
@@ -1643,6 +1707,47 @@ mod tests {
             dag.lower(&wma(col("x"), 3)),
             dag.lower(&decay_linear(col("x"), 3))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn logical_nodes_fold_fuse_and_match_unfused_execution() -> Result<()> {
+        use crate::alpha::{and, col, lit, ne, not, or};
+        let cs = test_cellset_fields(
+            HashMap::from([
+                ("x".to_string(), vec![0.0, 2.0, f64::NAN, -1.0]),
+                ("y".to_string(), vec![f64::NAN, f64::NAN, 0.0, 2.0]),
+            ]),
+            std::iter::once(0..4).collect(),
+            (0..4).map(|i| i..i + 1).collect(),
+            (0..4).collect(),
+        );
+        let expr = or(not(and(col("x"), col("y"))), ne(col("x"), col("y")));
+        let expected = [1.0, f64::NAN, 1.0, 1.0];
+        let mut dag = Dag::default();
+        let root = dag.lower(&expr);
+        let values = dag.eval_roots(&[root], &cs)?;
+        assert_vec_close(&to_cells(&values[0], Layout::Tn, &cs), &expected);
+        dag.fuse_elementwise(&[root]);
+        let Node::FusedEw { program, .. } = &dag.nodes[root.index()] else {
+            panic!("logical chain should fuse");
+        };
+        assert!(program.iter().any(|op| matches!(op, EwOp::And)));
+        assert!(program.iter().any(|op| matches!(op, EwOp::Or)));
+        assert!(program.iter().any(|op| matches!(op, EwOp::Not)));
+        assert!(program.iter().any(|op| matches!(op, EwOp::Cmp(CmpOp::Ne))));
+        assert_vec_close(&eval_dag(&expr, &cs)?, &expected);
+        assert_vec_close(&eval_tree(&expr, &cs)?, &expected);
+        for (expr, expected) in [
+            (and(lit(0.0), lit(f64::NAN)), 0.0),
+            (or(lit(f64::NAN), lit(2.0)), 1.0),
+            (not(lit(f64::NAN)), f64::NAN),
+            (ne(lit(2.0), lit(3.0)), 1.0),
+        ] {
+            let root = dag.lower(&expr);
+            assert!(matches!(dag.nodes[root.index()], Node::Const(_)));
+            assert_vec_close(&eval_dag(&expr, &cs)?, &[expected; 4]);
+        }
         Ok(())
     }
 

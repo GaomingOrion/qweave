@@ -18,12 +18,19 @@
 | Greater、Less | `qw.max(x, y)`、`qw.min(x, y)` | 是逐元素取极值，不是比较 |
 | Gt、Ge、Lt、Le、Eq | `x>y`、`x>=y`、`x<y`、`x<=y`、`x==y` | qweave 返回 1/0，任一输入 NaN 则返回 NaN；Qlib 返回布尔值 |
 | If | `qw.where_(condition, x, y)` | qweave 的 NaN 条件输出 NaN，不能照搬 NumPy 的真值转换规则 |
-| Ne | 无直接接口 | `!=` 尚不支持；用其他表达式组合时应显式考虑 NaN |
-| And、Or、Not | 无直接接口 | Qlib 使用位运算；不能直接把浮点 1/0 掩码视为相同类型 |
+| Ne | `x != y` | 返回 Float64 1/0，任一输入 NaN 则返回 NaN；不同于 Qlib 的布尔不等比较 |
+| And、Or、Not | `x & y`、`x \| y`、`~x` | Float64 三值逻辑：正数为真，非正数为假，NaN 为未知；Qlib 使用位运算 |
+
+逻辑掩码继续采用 Float64，可参与算术运算。假与未知为 0，真或未知为 1，其余
+无法确定的结果为 NaN；非未知仍为 NaN，交换左右操作数不改变结果。这不复刻 Qlib
+的整数位运算语义。组合比较时使用括号，例如 `(x > y) & (x != qw.lit(0.0))`。
+隐式 Python 真假判断现在抛出 `TypeError`：使用 `&`、`|`、`~`，不要使用
+`and`、`or`、`not`。
 
 ## 时序算子
 
-qweave 固定窗口要求最近 `days` 个 bar 齐全且没有 NaN，不暴露 `min_periods`。
+qweave 固定窗口要求最近 `days` 个 bar 齐全，不暴露 `min_periods`。缺失值通常使
+窗口失效；`ts_count` 是例外，满 `days` 行后统计非缺失样本数。
 Qlib 多数窗口使用 `min_periods=1`，部分支持 `N=0` expanding；因此预热期和有缺失值
 的结果通常不同。输入交易日、缺行和历史起点也必须由调用方统一，qweave 不自动补齐。
 
@@ -43,8 +50,8 @@ Qlib 多数窗口使用 `min_periods=1`，部分支持 `N=0` expanding；因此�
 | Skew、Kurt | `x.ts_skew(days)`、`x.ts_kurt(days)` | 相同的偏差修正公式；qweave 要求完整有限窗口；最低样本数分别为 3、4 |
 | EMA | `x.ema(days)` | qweave 为均值初始化的递归 EMA；Qlib 为校正权重 EWM，初值和缺失值处理不同 |
 | WMA | `x.wma(days)`，同 `x.decay_linear(days)` | qweave 为标准线性加权均值；对齐 Qlib 额外归一化的写法见下文 |
-| Mad | 无直接接口 | 窗口内关于同一个窗口均值的平均绝对偏差，不能直接用嵌套 rolling mean 替代 |
-| Count | 无直接接口 | 非缺失样本计数；对布尔条件求和不是完整替代 |
+| Mad | `x.ts_mad(days)` | 关于同一个窗口均值的平均绝对偏差；qweave 要求完整有限窗口，Qlib 跳过 NaN 且允许部分窗口 |
+| Count | `x.ts_count(days)` | 非 NaN/null 计数，零和无穷均计入；完整全缺失窗口为 0；不同于 Qlib，前 `days-1` 行为 NaN |
 | Rolling | 无通用字符串分发接口 | 按具体统计量选择方法；不支持 Qlib 的 expanding／特殊小数窗口分支 |
 
 `Skew`、`Kurt` 的公式分别参考 pandas 的[偏度](https://pandas.pydata.org/pandas-docs/version/2.2/reference/api/pandas.core.window.rolling.Rolling.skew.html)
@@ -75,5 +82,3 @@ qweave 另行规定非有限值后清空状态、重新预热。它不支持 Qli
 | PFeature | 不支持 PIT 财报数据的 provider 语义；由调用方预先构造可用时点正确的列 |
 | ChangeInstrument、Mask | 不提供表达式内切换标的；由调用方先把参考标的序列按时间连接到面板 |
 | TResample | 不在表达式引擎中改变时间轴；由调用方先用 Polars 重采样 |
-
-Mad、Count、布尔／不等算子属于尚未提供直接接口的能力；本表不表示后续版本的交付承诺。

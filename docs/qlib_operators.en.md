@@ -20,14 +20,22 @@ qweave numeric inputs are Float64 columns, with null treated as NaN.
 | Greater, Less | `qw.max(x, y)`, `qw.min(x, y)` | Elementwise extrema, not comparisons |
 | Gt, Ge, Lt, Le, Eq | `x>y`, `x>=y`, `x<y`, `x<=y`, `x==y` | qweave returns 1/0, or NaN if either operand is NaN; Qlib returns booleans |
 | If | `qw.where_(condition, x, y)` | qweave yields NaN for a NaN condition; NumPy truth conversion is not equivalent |
-| Ne | No direct interface | `!=` is unsupported; compositions must account for NaN explicitly |
-| And, Or, Not | No direct interface | Qlib uses bitwise operations; floating-point 1/0 masks are not the same type |
+| Ne | `x != y` | Float64 1/0; either input NaN yields NaN, unlike Qlib's boolean inequality |
+| And, Or, Not | `x & y`, `x \| y`, `~x` | Float64 three-valued logic: positive = true, nonpositive = false, NaN = unknown; Qlib uses bitwise operations |
+
+Logical masks remain Float64 and can participate in arithmetic. False AND
+unknown is 0; true OR unknown is 1; otherwise indeterminate results are NaN.
+NOT unknown is NaN. Operand order does not matter. These operators do not
+reproduce Qlib's integer bitwise semantics. Use parentheses around comparisons,
+e.g. `(x > y) & (x != qw.lit(0.0))`. Implicit Python truth testing now raises
+`TypeError`: use `&`, `|`, `~` instead of `and`, `or`, `not`.
 
 ## Time-Series Operators
 
-qweave fixed windows require the latest `days` bars with no NaN and do not expose
-`min_periods`. Most Qlib windows use `min_periods=1`, and some support expanding
-windows with `N=0`. Warmup and missing-value results therefore usually differ.
+qweave fixed windows require the latest `days` bars and do not expose
+`min_periods`. Missing values normally invalidate a window; `ts_count` instead
+counts nonmissing samples once all `days` rows are available. Most Qlib windows
+use `min_periods=1`, and some support expanding windows with `N=0`. Warmup and missing-value results therefore usually differ.
 Callers must also align trading calendars, absent rows, and history start points;
 qweave does not fill these automatically.
 
@@ -47,8 +55,8 @@ qweave does not fill these automatically.
 | Skew, Kurt | `x.ts_skew(days)`, `x.ts_kurt(days)` | Same bias-corrected formulas; qweave requires full finite windows and at least 3/4 samples respectively |
 | EMA | `x.ema(days)` | qweave uses mean-seeded recursive EMA; Qlib uses adjusted EWM, with different initialization and missing-value behavior |
 | WMA | `x.wma(days)`, equivalent to `x.decay_linear(days)` | Standard linearly weighted mean; see below for Qlib's extra normalization |
-| Mad | No direct interface | Mean absolute deviation about one window's mean; nested rolling means are not a direct substitute |
-| Count | No direct interface | Nonmissing sample count; summing a boolean condition is not a full substitute |
+| Mad | `x.ts_mad(days)` | Mean absolute deviation about the same window's mean; qweave requires full finite windows, while Qlib skips NaN and uses partial windows |
+| Count | `x.ts_count(days)` | Non-NaN/null count (including zero and infinities); full all-missing windows yield 0; unlike Qlib, first `days-1` rows yield NaN |
 | Rolling | No general string dispatch | Choose the specific statistic; Qlib's expanding/special fractional-window branches are unsupported |
 
 Skew and Kurt follow pandas' bias-corrected
@@ -85,6 +93,3 @@ values. Qlib's `N=0` and fractional N are unsupported. See the
 | PFeature | No PIT financial-data provider semantics; callers prepare columns with correct availability timestamps |
 | ChangeInstrument, Mask | No instrument switching inside expressions; join reference-instrument series to the panel by time first |
 | TResample | No expression-level time-axis changes; resample with Polars beforehand |
-
-Mad, Count, boolean, and inequality operators currently lack direct interfaces;
-this table is not a delivery commitment for future versions.

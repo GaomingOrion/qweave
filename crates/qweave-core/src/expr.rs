@@ -10,6 +10,8 @@ pub enum CmpOp {
     Le,
     Ge,
     Eq,
+    /// Inequality; a NaN operand produces NaN, like the other comparisons.
+    Ne,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +35,10 @@ pub enum Expr {
     TsRank(Box<Expr>, usize),
     TsRankRaw(Box<Expr>, usize),
     TsStd(Box<Expr>, usize),
+    /// Mean absolute deviation over a full finite window; zero days yields NaN.
+    TsMad(Box<Expr>, usize),
+    /// Non-NaN count after a full window of bars; zero days yields NaN.
+    TsCount(Box<Expr>, usize),
     /// EMA seeded by a full-window mean; non-finite samples reset the warmup.
     Ema(Box<Expr>, usize),
     /// Full-window bias-corrected Fisher excess kurtosis; windows smaller than 4 yield NaN.
@@ -60,8 +66,14 @@ pub enum Expr {
     Abs(Box<Expr>),
     Log(Box<Expr>),
     Sign(Box<Expr>),
+    /// Three-valued logical negation of a Float64 mask; NaN stays unknown.
+    Not(Box<Expr>),
     SignedPower(Box<Expr>, Box<Expr>),
     Power(Box<Expr>, Box<Expr>),
+    /// Three-valued conjunction; positive is true, nonpositive is false, NaN unknown.
+    And(Box<Expr>, Box<Expr>),
+    /// Three-valued disjunction; positive is true, nonpositive is false, NaN unknown.
+    Or(Box<Expr>, Box<Expr>),
     Min(Box<Expr>, Box<Expr>),
     Max(Box<Expr>, Box<Expr>),
     Cmp(CmpOp, Box<Expr>, Box<Expr>),
@@ -90,6 +102,8 @@ impl fmt::Display for Expr {
             Expr::TsRank(inner, days) => write!(f, "ts_rank({inner}, {days})"),
             Expr::TsRankRaw(inner, days) => write!(f, "ts_rank_raw({inner}, {days})"),
             Expr::TsStd(inner, days) => write!(f, "ts_std({inner}, {days})"),
+            Expr::TsCount(inner, days) => write!(f, "ts_count({inner}, {days})"),
+            Expr::TsMad(inner, days) => write!(f, "ts_mad({inner}, {days})"),
             Expr::Ema(inner, days) => write!(f, "ema({inner}, {days})"),
             Expr::TsKurt(inner, days) => write!(f, "ts_kurt({inner}, {days})"),
             Expr::TsSkew(inner, days) => write!(f, "ts_skew({inner}, {days})"),
@@ -119,9 +133,12 @@ impl fmt::Display for Expr {
             Expr::Abs(inner) => write!(f, "abs({inner})"),
             Expr::Log(inner) => write!(f, "log({inner})"),
             Expr::Sign(inner) => write!(f, "sign({inner})"),
+            Expr::Not(inner) => write!(f, "not({inner})"),
             Expr::SignedPower(inner, exponent) => write!(f, "signed_power({inner}, {exponent})"),
             Expr::Power(inner, exponent) => write!(f, "power({inner}, {exponent})"),
             Expr::Min(lhs, rhs) => write!(f, "min({lhs}, {rhs})"),
+            Expr::Or(lhs, rhs) => write!(f, "or({lhs}, {rhs})"),
+            Expr::And(lhs, rhs) => write!(f, "and({lhs}, {rhs})"),
             Expr::Max(lhs, rhs) => write!(f, "max({lhs}, {rhs})"),
             Expr::Cmp(op, lhs, rhs) => write!(f, "{}({lhs}, {rhs})", cmp_name(*op)),
             Expr::Where(cond, when_true, when_false) => {
@@ -138,6 +155,7 @@ fn cmp_name(op: CmpOp) -> &'static str {
         CmpOp::Le => "le",
         CmpOp::Ge => "ge",
         CmpOp::Eq => "eq",
+        CmpOp::Ne => "ne",
     }
 }
 
@@ -162,6 +180,8 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::Sub(lhs, rhs)
         | Expr::Mul(lhs, rhs)
         | Expr::Div(lhs, rhs)
+        | Expr::And(lhs, rhs)
+        | Expr::Or(lhs, rhs)
         | Expr::Min(lhs, rhs)
         | Expr::Max(lhs, rhs)
         | Expr::Cmp(_, lhs, rhs)
@@ -202,6 +222,8 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::TsArgMax(inner, _)
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
+        | Expr::TsMad(inner, _)
+        | Expr::TsCount(inner, _)
         | Expr::TsStd(inner, _)
         | Expr::Ema(inner, _)
         | Expr::TsKurt(inner, _)
@@ -217,6 +239,7 @@ pub fn collect_group_fields(expr: &Expr, out: &mut BTreeSet<String>) -> Result<(
         | Expr::Scale(inner, _)
         | Expr::Abs(inner)
         | Expr::Log(inner)
+        | Expr::Not(inner)
         | Expr::Sign(inner) => collect_group_fields(inner, out)?,
         Expr::Field(_) | Expr::Const(_) => {}
     }
@@ -233,6 +256,8 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::Sub(lhs, rhs)
         | Expr::Mul(lhs, rhs)
         | Expr::Div(lhs, rhs)
+        | Expr::And(lhs, rhs)
+        | Expr::Or(lhs, rhs)
         | Expr::Min(lhs, rhs)
         | Expr::Max(lhs, rhs)
         | Expr::Cmp(_, lhs, rhs)
@@ -275,6 +300,8 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::TsArgMax(inner, _)
         | Expr::TsRank(inner, _)
         | Expr::TsRankRaw(inner, _)
+        | Expr::TsMad(inner, _)
+        | Expr::TsCount(inner, _)
         | Expr::TsStd(inner, _)
         | Expr::Ema(inner, _)
         | Expr::TsKurt(inner, _)
@@ -290,6 +317,7 @@ pub fn visit_fields(expr: &Expr, visit: &mut impl FnMut(&str)) {
         | Expr::Scale(inner, _)
         | Expr::Abs(inner)
         | Expr::Log(inner)
+        | Expr::Not(inner)
         | Expr::Sign(inner) => {
             visit_fields(inner, visit);
         }
@@ -317,6 +345,8 @@ pub fn rename_fields(expr: &Expr, names: &BTreeMap<String, String>) -> Expr {
         Expr::TsRank(inner, days) => unary_window(inner, *days, names, Expr::TsRank),
         Expr::TsRankRaw(inner, days) => unary_window(inner, *days, names, Expr::TsRankRaw),
         Expr::TsStd(inner, days) => unary_window(inner, *days, names, Expr::TsStd),
+        Expr::TsCount(inner, days) => unary_window(inner, *days, names, Expr::TsCount),
+        Expr::TsMad(inner, days) => unary_window(inner, *days, names, Expr::TsMad),
         Expr::Ema(inner, days) => unary_window(inner, *days, names, Expr::Ema),
         Expr::TsKurt(inner, days) => unary_window(inner, *days, names, Expr::TsKurt),
         Expr::TsSkew(inner, days) => unary_window(inner, *days, names, Expr::TsSkew),
@@ -361,9 +391,12 @@ pub fn rename_fields(expr: &Expr, names: &BTreeMap<String, String>) -> Expr {
         Expr::Abs(inner) => unary(inner, names, Expr::Abs),
         Expr::Log(inner) => unary(inner, names, Expr::Log),
         Expr::Sign(inner) => unary(inner, names, Expr::Sign),
+        Expr::Not(inner) => unary(inner, names, Expr::Not),
         Expr::SignedPower(lhs, rhs) => binary(lhs, rhs, names, Expr::SignedPower),
         Expr::Power(lhs, rhs) => binary(lhs, rhs, names, Expr::Power),
         Expr::Min(lhs, rhs) => binary(lhs, rhs, names, Expr::Min),
+        Expr::Or(lhs, rhs) => binary(lhs, rhs, names, Expr::Or),
+        Expr::And(lhs, rhs) => binary(lhs, rhs, names, Expr::And),
         Expr::Max(lhs, rhs) => binary(lhs, rhs, names, Expr::Max),
         Expr::Cmp(op, lhs, rhs) => Expr::Cmp(
             *op,

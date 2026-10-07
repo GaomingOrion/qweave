@@ -126,6 +126,20 @@ pub fn ts_std(x: Expr, d: usize) -> Expr {
     Expr::TsStd(Box::new(x), d)
 }
 
+/// Mean absolute deviation of `x` about each window's mean, per symbol.
+/// Requires `d` finite bars; incomplete/non-finite windows or `d == 0` yield
+/// NaN. Constant windows yield zero. Constructs an expression without evaluation.
+pub fn ts_mad(x: Expr, d: usize) -> Expr {
+    Expr::TsMad(Box::new(x), d)
+}
+
+/// Count non-NaN values in the last `d` bars per symbol, returning Float64.
+/// Requires `d` bars, but permits missing samples; infinities count as present.
+/// Incomplete windows or `d == 0` yield NaN. Constructs without evaluation.
+pub fn ts_count(x: Expr, d: usize) -> Expr {
+    Expr::TsCount(Box::new(x), d)
+}
+
 pub fn sma(x: Expr, d: usize, m: usize) -> Expr {
     Expr::Sma(Box::new(x), d, m)
 }
@@ -276,6 +290,32 @@ pub fn ge(x: Expr, y: Expr) -> Expr {
 
 pub fn eq(x: Expr, y: Expr) -> Expr {
     cmp(CmpOp::Eq, x, y)
+}
+
+/// Elementwise inequality of `x` and `y`, yielding Float64 1 or 0.
+/// A NaN operand yields NaN. Constructs an expression without evaluation.
+pub fn ne(x: Expr, y: Expr) -> Expr {
+    cmp(CmpOp::Ne, x, y)
+}
+
+/// Three-valued conjunction of Float64 masks, yielding 1, 0, or NaN.
+/// Positive is true, nonpositive is false, NaN is unknown; false AND unknown
+/// is false. Both operands are evaluated; this constructor does not evaluate data.
+pub fn and(x: Expr, y: Expr) -> Expr {
+    Expr::And(Box::new(x), Box::new(y))
+}
+
+/// Three-valued disjunction of Float64 masks, yielding 1, 0, or NaN.
+/// Positive is true, nonpositive is false, NaN is unknown; true OR unknown
+/// is true. Both operands are evaluated; this constructor does not evaluate data.
+pub fn or(x: Expr, y: Expr) -> Expr {
+    Expr::Or(Box::new(x), Box::new(y))
+}
+
+/// Logical negation of a Float64 mask: positive becomes 0, nonpositive becomes
+/// 1, and NaN stays unknown. Constructs an expression without evaluating data.
+pub fn not(x: Expr) -> Expr {
+    Expr::Not(Box::new(x))
 }
 
 pub fn where_(c: Expr, a: Expr, b: Expr) -> Expr {

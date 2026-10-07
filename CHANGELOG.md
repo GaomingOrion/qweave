@@ -7,6 +7,14 @@ and patch versions should remain backward compatible within a minor line.
 
 ## Unreleased
 
+- Added Float64 inequality and three-valued logical masks (`!=`, `&`, `|`, `~`)
+  to Python/Rust, including DAG fusion and constant folding.
+- Added rolling `ts_mad` (mean absolute deviation, full finite windows) and
+  incremental `ts_count` (nonmissing samples after a full window of rows).
+- **Behavior tightening (Python):** implicit expression truth testing now raises
+  `TypeError`. Use parenthesized comparisons with `&`, `|`, and `~` instead of
+  Python `and`, `or`, and `not` or chained comparisons.
+
 ## v0.6.1 - 2026-10-07
 
 - Optimized `ts_skew` and `ts_kurt` with incremental rolling central moments

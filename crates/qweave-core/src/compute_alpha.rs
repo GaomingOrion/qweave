@@ -102,6 +102,8 @@ fn requires_tree_engine(expr: &Expr) -> bool {
         | Expr::Sub(a, b)
         | Expr::Mul(a, b)
         | Expr::Div(a, b)
+        | Expr::And(a, b)
+        | Expr::Or(a, b)
         | Expr::Min(a, b)
         | Expr::Max(a, b)
         | Expr::Cmp(_, a, b)
@@ -123,6 +125,8 @@ fn requires_tree_engine(expr: &Expr) -> bool {
         | Expr::TsArgMax(x, _)
         | Expr::TsRank(x, _)
         | Expr::TsRankRaw(x, _)
+        | Expr::TsMad(x, _)
+        | Expr::TsCount(x, _)
         | Expr::TsStd(x, _)
         | Expr::Ema(x, _)
         | Expr::TsKurt(x, _)
@@ -136,6 +140,7 @@ fn requires_tree_engine(expr: &Expr) -> bool {
         | Expr::Scale(x, _)
         | Expr::Abs(x)
         | Expr::Log(x)
+        | Expr::Not(x)
         | Expr::Sign(x) => requires_tree_engine(x),
     }
 }
@@ -238,12 +243,24 @@ mod tests {
 
     #[test]
     fn standard_time_series_preserve_dag_eligibility() {
-        use crate::alpha::{col, ema, gtja_wma, rank, ts_kurt, ts_skew, wma};
-        for make in [ts_skew, ts_kurt, ema, wma] {
+        use crate::alpha::{col, ema, gtja_wma, rank, ts_count, ts_kurt, ts_mad, ts_skew, wma};
+        for make in [ts_skew, ts_kurt, ema, wma, ts_mad, ts_count] {
             assert!(!requires_tree_engine(&rank(make(col("close"), 5))));
             // Traversal must still discover a legacy tree-only child.
             assert!(requires_tree_engine(&make(gtja_wma(col("close"), 3), 5)));
         }
+    }
+
+    #[test]
+    fn logical_operators_preserve_tree_fallback() {
+        use crate::alpha::{and, col, gtja_wma, ne, not, or};
+        for make in [and, or, ne] {
+            assert!(!requires_tree_engine(&make(col("x"), col("y"))));
+            assert!(requires_tree_engine(&make(gtja_wma(col("x"), 3), col("y"))));
+            assert!(requires_tree_engine(&make(col("x"), gtja_wma(col("y"), 3))));
+        }
+        assert!(!requires_tree_engine(&not(col("x"))));
+        assert!(requires_tree_engine(&not(gtja_wma(col("x"), 3))));
     }
 
     fn options() -> PanelOptions {
