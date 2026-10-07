@@ -46,7 +46,7 @@ qweave does not fill these automatically.
 | Corr, Cov | `qw.correlation(x, y, days)`, `qw.covariance(x, y, days)` | Pearson correlation and sample covariance; missing pairs, warmup, and near-zero variance handling differ |
 | Skew, Kurt | `x.ts_skew(days)`, `x.ts_kurt(days)` | Same bias-corrected formulas; qweave requires full finite windows and at least 3/4 samples respectively |
 | EMA | `x.ema(days)` | qweave uses mean-seeded recursive EMA; Qlib uses adjusted EWM, with different initialization and missing-value behavior |
-| WMA | `x.wma(days)`, equivalent to `x.decay_linear(days)` | Standard linearly weighted mean; does not reproduce Qlib's extra normalization |
+| WMA | `x.wma(days)`, equivalent to `x.decay_linear(days)` | Standard linearly weighted mean; see below for Qlib's extra normalization |
 | Mad | No direct interface | Mean absolute deviation about one window's mean; nested rolling means are not a direct substitute |
 | Count | No direct interface | Nonmissing sample count; summing a boolean condition is not a full substitute |
 | Rolling | No general string dispatch | Choose the specific statistic; Qlib's expanding/special fractional-window branches are unsupported |
@@ -61,7 +61,16 @@ Standard WMA uses oldest-to-newest weights `1..days`, divided by their sum; see
 [TA-Lib WMA](https://ta-lib.org/functions/wma.html). Qlib v0.9.7 applies `nanmean`
 to already normalized weighted values: `[1,2,3]` yields `7/9`, versus standard
 WMA's `7/3`. A full three-bar window of ones yields `1/3` versus `1`.
-This is an explicit migration boundary, not a hidden compatibility option.
+For a positive integer window length `N`, on full windows containing only finite
+values (no NaN, null, or infinity), Qlib's WMA equals standard WMA divided by `N`.
+For example, to match Qlib's 20-period WMA:
+
+```python
+qlib_wma20 = x.wma(20) / qw.lit(20.0)
+```
+
+This composition still follows qweave's full-window and missing-value rules;
+it does not reproduce Qlib's warmup or missing-value handling.
 
 EMA's mean initialization follows [TA-Lib EMA](https://ta-lib.org/functions/ema.html).
 qweave additionally specifies state reset and renewed warmup after non-finite

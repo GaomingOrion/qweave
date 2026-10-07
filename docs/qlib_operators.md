@@ -42,7 +42,7 @@ Qlib 多数窗口使用 `min_periods=1`，部分支持 `N=0` expanding；因此�
 | Corr、Cov | `qw.correlation(x, y, days)`、`qw.covariance(x, y, days)` | Pearson 相关与样本协方差；缺失配对、预热及近零方差处理不同 |
 | Skew、Kurt | `x.ts_skew(days)`、`x.ts_kurt(days)` | 相同的偏差修正公式；qweave 要求完整有限窗口；最低样本数分别为 3、4 |
 | EMA | `x.ema(days)` | qweave 为均值初始化的递归 EMA；Qlib 为校正权重 EWM，初值和缺失值处理不同 |
-| WMA | `x.wma(days)`，同 `x.decay_linear(days)` | qweave 为标准线性加权均值；不复刻 Qlib 的额外归一化 |
+| WMA | `x.wma(days)`，同 `x.decay_linear(days)` | qweave 为标准线性加权均值；对齐 Qlib 额外归一化的写法见下文 |
 | Mad | 无直接接口 | 窗口内关于同一个窗口均值的平均绝对偏差，不能直接用嵌套 rolling mean 替代 |
 | Count | 无直接接口 | 非缺失样本计数；对布尔条件求和不是完整替代 |
 | Rolling | 无通用字符串分发接口 | 按具体统计量选择方法；不支持 Qlib 的 expanding／特殊小数窗口分支 |
@@ -54,7 +54,14 @@ Qlib 多数窗口使用 `min_periods=1`，部分支持 `N=0` expanding；因此�
 标准 WMA 使用从旧到新的权重 `1..days`，除以权重和，见 [TA-Lib WMA](https://ta-lib.org/functions/wma.html)。
 Qlib v0.9.7 对已经归一化的加权值又取 `nanmean`：完整窗口 `[1,2,3]` 的结果为
 `7/9`，标准 WMA 为 `7/3`；常数 1 的三期窗口则分别为 `1/3` 和 `1`。
-该差异是明确的迁移边界，不通过兼容参数隐藏。
+对于正整数窗口长度 `N`，在完整且所有值均有限（无 NaN、null 或无穷值）的窗口上，
+Qlib 的 WMA 等于标准 WMA 除以 `N`。例如，对齐 Qlib 的 20 期 WMA 可写为：
+
+```python
+qlib_wma20 = x.wma(20) / qw.lit(20.0)
+```
+
+该组合仍遵循 qweave 的完整窗口与缺失值规则，不复刻 Qlib 的预热和缺失值处理。
 
 EMA 的均值初始化参考 [TA-Lib EMA](https://ta-lib.org/functions/ema.html)；
 qweave 另行规定非有限值后清空状态、重新预热。它不支持 Qlib 的 `N=0` 或小数 `N`。
