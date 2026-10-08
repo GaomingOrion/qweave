@@ -1,6 +1,6 @@
 [package]
 name = "qweave-eval"
-version = "0.6.1"
+version = "0.6.2"
 description = "Factor evaluation kernels for qweave"
 authors.workspace = true
 edition.workspace = true

@@ -7,6 +7,8 @@ and patch versions should remain backward compatible within a minor line.
 
 ## Unreleased
 
+## v0.6.2 - 2026-10-08
+
 - Added Float64 inequality and three-valued logical masks (`!=`, `&`, `|`, `~`)
   to Python/Rust, including DAG fusion and constant folding.
 - Added rolling `ts_mad` (mean absolute deviation, full finite windows) and

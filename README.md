@@ -40,8 +40,9 @@ pip install qweave
 如需指定平台的 wheel，见 [GitHub Releases](https://github.com/GaomingOrion/qweave/releases/latest)。
 从源码构建见[开发者手册](docs/development.md)。
 
-v0.6.1 新增 Skew、Kurt、EMA 和标准 WMA，支持 Skew/Kurt 滑窗增量计算。
-Qlib 对齐写法和 Rust WMA 迁移说明见 [v0.6.1 发布说明](.github/release-notes/v0.6.1.md)。
+v0.6.2 新增 `!=`、`&`、`|`、`~`、`ts_mad` 和 `ts_count`，继续使用 Float64 掩码。
+表达式的隐式 Python 真假判断现在会报错；请使用带括号的比较及 `&`、`|`、`~`。
+用法与迁移说明见 [v0.6.2 发布说明](.github/release-notes/v0.6.2.md)。
 
 ## 从行情面板到因子报告
 
